@@ -28,7 +28,7 @@ using Star = ProtoBuf.PatternFirework.Star;
 
 namespace Oxide.Plugins
 {
-    [Info("RustApp", "RustApp.io", "2.6.0")]
+    [Info("RustApp", "RustApp.io", "2.6.1")]
     public class RustApp : RustPlugin
     {
         #region Variables
@@ -1970,7 +1970,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var code = args.Args[0];
+            string? code = args.GetString(0);
 
             _RustAppEngine?.gameObject.AddComponent<PairWorker>().StartPairing(code);
         }
@@ -1978,42 +1978,43 @@ namespace Oxide.Plugins
         [ConsoleCommand("ra.mute")]
         private void CmdConsoleMute(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            var caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            var clearArgs = (args.Args ?? Array.Empty<string>()).Where(v => v != "--broadcast").ToList();
-            if (clearArgs.Count() < 3)
+            bool broadcast = args.HasArg("--broadcast", true);
+
+            if (!args.HasArgs(3))
             {
                 Error("Incorrect command format!\nCorrect format: ra.mute <steam-id> <reason> <time>\n\nAdditional options are available:\n'--broadcast' - broadcast mute");
                 return;
             }
 
-            var steamId = clearArgs[0];
-            var reason = clearArgs[1];
-            var duration = clearArgs[2];
+            string steamId = args.GetString(0);
+            string reason = args.GetString(1);
+            string duration = args.GetString(2);
 
-            var broadcast_bool = args.FullString.Contains("--broadcast");
-
-            RustApp_PlayerMuteCreate(steamId, reason, duration, null, null, broadcast_bool);
+            RustApp_PlayerMuteCreate(steamId, reason, duration, null, null, broadcast);
         }
 
         [ConsoleCommand("ra.unmute")]
         private void CmdConsoleUnmute(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            BasePlayer? caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            if (args.Args.Count() < 1)
+            if (!args.HasArgs(1))
             {
                 Error("Incorrect command format!\nCorrect format: ra.unmute <steam-id>");
                 return;
             }
 
-            var steamId = args.Args[0];
+            string? steamId = args.GetString(0);
 
             RustApp_PlayerMuteDelete(steamId);
         }
@@ -2021,32 +2022,31 @@ namespace Oxide.Plugins
         [ConsoleCommand("ra.ban")]
         private void CmdConsoleBan(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            BasePlayer? caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            var clearArgs = (args.Args ?? Array.Empty<string>()).Where(v => v != "--ban-ip" && v != "--global").ToList();
+            bool banIp = args.HasArg("--ban-ip", true);
+            bool global = args.HasArg("--global", true);
 
-            if (clearArgs.Count() < 2)
+            if (!args.HasArgs(2))
             {
                 Error("Incorrect command format!\nCorrect format: ra.ban <steam-id> <reason> <time (optional)>\n\nAdditional options are available:\n'--ban-ip' - bans IP\n'--global' - bans globally\n\nExample of banning with IP, globally: ra.ban 7656119812110397 \"cheat\" 7d --ban-ip --global");
                 return;
             }
 
-            var steam_id = clearArgs[0];
-            var reason = clearArgs[1];
-            var duration = clearArgs.Count() == 3 ? clearArgs[2] : "";
+            string steamId = args.GetString(0);
+            string reason = args.GetString(1);
+            string duration = args.GetString(2);
 
-            var global_bool = args.FullString.Contains("--global");
-            var ip_bool = args.FullString.Contains("--ban-ip");
-
-            BanCreate(steam_id, new CourtApi.PluginBanCreatePayload
+            BanCreate(steamId, new CourtApi.PluginBanCreatePayload
             {
-                target_steam_id = steam_id,
+                target_steam_id = steamId,
                 reason = reason,
-                global = global_bool,
-                ban_ip = ip_bool,
+                global = global,
+                ban_ip = banIp,
                 duration = duration.Length > 0 ? duration : null,
                 comment = "Ban via console"
             });
@@ -2055,22 +2055,21 @@ namespace Oxide.Plugins
         [ConsoleCommand("ra.unban")]
         private void CmdConsoleBanDelete(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            BasePlayer? caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            var clearArgs = (args.Args ?? Array.Empty<string>()).ToList();
-
-            if (clearArgs.Count() != 1)
+            if (!args.HasArgs(1))
             {
                 Error("Incorrect command format!\nCorrect format: ra.unban <steam-id>");
                 return;
             }
 
-            var steam_id = clearArgs[0];
+            string steamId = args.GetString(0);
 
-            BanDelete(steam_id);
+            BanDelete(steamId);
         }
 
         #endregion
