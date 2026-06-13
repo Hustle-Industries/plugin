@@ -2336,7 +2336,12 @@ namespace Oxide.Plugins
 
         private void OnTeamDisband(RelationshipManager.PlayerTeam team)
         {
-            team.members.ForEach(v => SetTeamChange(v.ToString(), v.ToString()));
+            List<ulong>? members = team.members;
+            for (int i = 0; i < members.Count; i++)
+            {
+                string id = members[i].ToString();
+                SetTeamChange(id, id);
+            }
         }
 
         private void OnTeamLeave(RelationshipManager.PlayerTeam team, BasePlayer player)
