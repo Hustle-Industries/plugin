@@ -1440,16 +1440,25 @@ namespace Oxide.Plugins
                 });
             }
 
+
+            private static readonly Dictionary<(string name, bool internalCall), string> _queueNameCache = new();
+
             private string ConvertToRustAppQueueFormat(string input, bool isInternalCall)
             {
-                var words = input.Replace("court/", "").Split('-');
+                (string input, bool isInternalCall) key = (input, isInternalCall);
+                if (_queueNameCache.TryGetValue(key, out string? cached))
+                    return cached;
+
+                string[]? words = input.Replace("court/", "").Split('-');
 
                 for (int i = 0; i < words.Length; i++)
                 {
                     words[i] = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(words[i]);
                 }
 
-                return $"RustApp_{(isInternalCall ? "Internal" : "")}Queue_" + string.Join("", words);
+                string result = $"RustApp_{(isInternalCall ? "Internal" : "")}Queue_" + string.Join("", words);
+                _queueNameCache[key] = result;
+                return result;
             }
         }
 
