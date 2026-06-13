@@ -282,23 +282,42 @@ namespace Oxide.Plugins
 
             #region SendReports
 
-            public class PluginReportDto
+            public class PluginReportDto : Pool.IPooled
             {
                 public string initiator_steam_id;
-                [CanBeNull]
                 public string target_steam_id;
-
                 public List<string> sub_targets_steam_ids;
-
                 public string reason;
-
-                [CanBeNull]
                 public string message;
+
+                public static PluginReportDto Create(string initiatorSteamId, string targetSteamId, string reason, string message = null)
+                {
+                    PluginReportDto? dto = Pool.Get<PluginReportDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.message = message;
+                    return dto;
+                }
+
+                public void LeavePool() => sub_targets_steam_ids = Pool.Get<List<string>>();
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    reason = null;
+                    message = null;
+                    Pool.FreeUnmanaged(ref sub_targets_steam_ids);
+                }
             }
 
-            public class PluginReportBatchPayload
+            public class PluginReportBatchPayload : Pool.IPooled
             {
-                public List<CourtApi.PluginReportDto> reports;
+                public List<PluginReportDto> reports;
+
+                public void LeavePool() => reports = Pool.Get<List<PluginReportDto>>();
+                public void EnterPool() => Pool.FreeUnmanaged(ref reports);
             }
 
             public static StableRequest<object> SendReports(PluginReportBatchPayload payload)
@@ -1670,7 +1689,7 @@ namespace Oxide.Plugins
         {
             private readonly List<CourtApi.PluginChatMessageDto> QueueMessages = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1721,10 +1740,10 @@ namespace Oxide.Plugins
 
         private class ReportWorker : RustAppWorker
         {
-            public Dictionary<ulong, double> ReportCooldowns = new Dictionary<ulong, double>();
-            private List<CourtApi.PluginReportDto> QueueReportSend = new List<CourtApi.PluginReportDto>();
+            public readonly Dictionary<ulong, double> ReportCooldowns = new();
+            private readonly List<CourtApi.PluginReportDto> QueueReportSend = new();
 
-            public void Awake()
+            public new void Awake()
             {
                 base.Awake();
 
@@ -1743,19 +1762,33 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginReportBatchPayload { reports = Pool.Get<List<CourtApi.PluginReportDto>>() };
+                CourtApi.PluginReportBatchPayload? payload = Pool.Get<CourtApi.PluginReportBatchPayload>();
                 payload.reports.AddRange(QueueReportSend);
                 QueueReportSend.Clear();
 
                 CourtApi.SendReports(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.reports);
+                    Pool.Free(ref payload.reports, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     QueueReportSend.AddRange(payload.reports);
-                    Pool.FreeUnmanaged(ref payload.reports);
+                    payload.reports.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < QueueReportSend.Count; i++)
+                {
+                    CourtApi.PluginReportDto item = QueueReportSend[i];
+                    Pool.Free(ref item);
+                }
+                QueueReportSend.Clear();
             }
         }
 
@@ -4110,17 +4143,13 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var was_checked = _CheckInfo.LastChecks.ContainsKey(target_steam_id) && CurrentTime() - _CheckInfo.LastChecks[target_steam_id] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+            bool was_checked = _CheckInfo.LastChecks.ContainsKey(target_steam_id) && CurrentTime() - _CheckInfo.LastChecks[target_steam_id] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
             Interface.Oxide.CallHook("RustApp_OnPlayerReported", initiator_steam_id, target_steam_id, reason, message, was_checked);
 
-            _RustAppEngine?.ReportWorker?.SendReport(new CourtApi.PluginReportDto
-            {
-                initiator_steam_id = initiator_steam_id,
-                target_steam_id = target_steam_id,
-                sub_targets_steam_ids = new List<string>(),
-                message = message,
-                reason = reason
-            });
+            ReportWorker? worker = _RustAppEngine?.ReportWorker;
+            if (worker == null) return;
+
+            worker.SendReport(CourtApi.PluginReportDto.Create(initiator_steam_id, target_steam_id, reason, message));
         }
 
         private void RA_BanPlayer(string steam_id, string reason, string duration, bool global, bool ban_ip, string comment = "")
