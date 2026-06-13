@@ -386,7 +386,11 @@ namespace Oxide.Plugins
                 public List<PluginSleepingBagDto> sleeping_bags;
 
                 public void LeavePool() => sleeping_bags = Pool.Get<List<PluginSleepingBagDto>>();
-                public void EnterPool() => Pool.FreeUnmanaged(ref sleeping_bags);
+
+                public void EnterPool()
+                {
+                    if (sleeping_bags != null) Pool.FreeUnmanaged(ref sleeping_bags);
+                }
             }
 
             public static StableRequest<object> SleepingBagCreate(PluginSleepingBagBatchDto payload)
@@ -844,15 +848,37 @@ namespace Oxide.Plugins
 
             #region BanGetBatch
 
-            public class BanGetBatchEntryPayloadDto
+            public class BanGetBatchEntryPayloadDto : Pool.IPooled
             {
                 public string steam_id;
                 public string ip;
+
+                public static BanGetBatchEntryPayloadDto Create(string steamId, string ip)
+                {
+                    BanGetBatchEntryPayloadDto? dto = Pool.Get<BanGetBatchEntryPayloadDto>();
+                    dto.steam_id = steamId;
+                    dto.ip = ip;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    ip = null;
+                }
             }
 
-            public class BanGetBatchPayload
+            public class BanGetBatchPayload : Pool.IPooled
             {
                 public List<BanGetBatchEntryPayloadDto> players;
+
+                public void LeavePool() => players = Pool.Get<List<BanGetBatchEntryPayloadDto>>();
+
+                public void EnterPool()
+                {
+                    if (players != null) Pool.FreeUnmanaged(ref players);
+                }
             }
 
             public class BanGetBatchEntryResponseDto
@@ -1593,7 +1619,7 @@ namespace Oxide.Plugins
         {
             private readonly Dictionary<string, BanApi.BanGetBatchEntryPayloadDto> BanUpdateQueue = new();
 
-            public void Awake()
+            public new void Awake()
             {
                 base.Awake();
 
@@ -1604,17 +1630,17 @@ namespace Oxide.Plugins
 
             private void DefaultScanAllPlayers()
             {
-                foreach (var player in BasePlayer.activePlayerList)
+                foreach (BasePlayer? player in BasePlayer.activePlayerList)
                 {
                     try { CheckBans(player); } catch { }
                 }
 
-                foreach (var queued in ServerMgr.Instance.connectionQueue.queue)
+                foreach (Connection? queued in ServerMgr.Instance.connectionQueue.queue)
                 {
                     try { CheckBans(queued.userid.ToString(), IPAddressWithoutPort(queued.ipaddress)); } catch { }
                 }
 
-                foreach (var loading in ServerMgr.Instance.connectionQueue.joining)
+                foreach (Connection? loading in ServerMgr.Instance.connectionQueue.joining)
                 {
                     try { CheckBans(loading.userid.ToString(), IPAddressWithoutPort(loading.ipaddress)); } catch { }
                 }
@@ -1637,7 +1663,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                BanUpdateQueue[steamId] = new BanApi.BanGetBatchEntryPayloadDto { steam_id = steamId, ip = ip };
+                BanUpdateQueue[steamId] = BanApi.BanGetBatchEntryPayloadDto.Create(steamId, ip);
             }
 
             private void CycleBanUpdate()
@@ -1671,45 +1697,51 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                BanApi.BanGetBatchPayload payload = new() { players = Pool.Get<List<BanApi.BanGetBatchEntryPayloadDto>>() };
+                BanApi.BanGetBatchPayload? payload = Pool.Get<BanApi.BanGetBatchPayload>();
+                
                 foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
-                {
                     payload.players.Add(entry);
-                }
+                
                 BanUpdateQueue.Clear();
 
                 BanApi.BanGetBatch(payload).Execute((data) =>
                 {
                     Dictionary<string, BanApi.BanGetBatchEntryResponseDto>? entriesByPid = Pool.Get<Dictionary<string, BanApi.BanGetBatchEntryResponseDto>>();
-                    if (data?.entries != null)
+                    try
                     {
-                        for (int i = 0; i < data.entries.Count; i++)
+                        if (data?.entries != null)
                         {
-                            BanApi.BanGetBatchEntryResponseDto? e = data.entries[i];
-                            if (e?.steam_id != null) entriesByPid[e.steam_id] = e;
-                        }
-                    }
-
-                    for (int i = 0; i < payload.players.Count; i++)
-                    {
-                        BanApi.BanGetBatchEntryPayloadDto? originalPlayer = payload.players[i];
-                        BanApi.BanDto active = null;
-                        if (entriesByPid.TryGetValue(originalPlayer.steam_id, out BanApi.BanGetBatchEntryResponseDto? entry) && entry.bans != null)
-                        {
-                            for (int j = 0; j < entry.bans.Count; j++)
+                            for (int i = 0; i < data.entries.Count; i++)
                             {
-                                if (entry.bans[j].computed_is_active)
-                                {
-                                    active = entry.bans[j];
-                                    break;
-                                }
+                                var e = data.entries[i];
+                                if (e?.steam_id != null) entriesByPid[e.steam_id] = e;
                             }
                         }
-                        callback.Invoke(originalPlayer.steam_id, active);
-                    }
 
-                    Pool.FreeUnmanaged(ref entriesByPid);
-                    Pool.FreeUnmanaged(ref payload.players);
+                        for (int i = 0; i < payload.players.Count; i++)
+                        {
+                            BanApi.BanGetBatchEntryPayloadDto? originalPlayer = payload.players[i];
+                            BanApi.BanDto active = null;
+                            if (entriesByPid.TryGetValue(originalPlayer.steam_id, out BanApi.BanGetBatchEntryResponseDto? entry) && entry.bans != null)
+                            {
+                                for (int j = 0; j < entry.bans.Count; j++)
+                                {
+                                    if (entry.bans[j].computed_is_active)
+                                    {
+                                        active = entry.bans[j];
+                                        break;
+                                    }
+                                }
+                            }
+                            callback.Invoke(originalPlayer.steam_id, active);
+                        }
+                    }
+                    finally
+                    {
+                        Pool.FreeUnmanaged(ref entriesByPid);
+                        Pool.Free(ref payload.players, freeElements: true);
+                        Pool.Free(ref payload);
+                    }
                 },
                 (_) =>
                 {
@@ -1717,10 +1749,23 @@ namespace Oxide.Plugins
                     for (int i = 0; i < payload.players.Count; i++)
                     {
                         BanApi.BanGetBatchEntryPayloadDto? p = payload.players[i];
-                        BanUpdateQueue.TryAdd(p.steam_id, p);
+                        BanUpdateQueue[p.steam_id] = p;
                     }
-                    Pool.FreeUnmanaged(ref payload.players);
+                    payload.players.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
+                {
+                    BanApi.BanGetBatchEntryPayloadDto? e = entry;
+                    Pool.Free(ref e);
+                }
+                BanUpdateQueue.Clear();
             }
 
             public void ReactOnDirectBan(string steamId, BanApi.BanDto ban)
