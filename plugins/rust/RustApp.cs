@@ -4058,28 +4058,47 @@ namespace Oxide.Plugins
 
             player.Command("gametip.showtoast", (int)type, text, 1);
         }
+        
+        [ThreadStatic] private static List<BuildingBlock> _buildAuthBlocks;
+        [ThreadStatic] private static HashSet<uint> _buildAuthSeenBuildings;
 
-        // It is more optimized way to detect building authed instead of default BasePlayer.IsBuildingAuthed()
         private static bool DetectBuildingAuth(BasePlayer player)
         {
-            const int SearchRadius = 16 + 2;
+            const float SearchRadius = 18f;
+            const float SqrRadius = SearchRadius * SearchRadius;
 
-            var pos = player.transform.position;
-            var results = Facepunch.Pool.Get<List<BuildingPrivlidge>>();
-            BaseEntity.Query.Server.GetInSphere(pos, SearchRadius, results, BaseEntity.Query.DistanceCheckType.None);
+            List<BuildingBlock> blocks = _buildAuthBlocks ??= new List<BuildingBlock>(48);
+            HashSet<uint> seenBuildings = _buildAuthSeenBuildings ??= new HashSet<uint>();
+            blocks.Clear();
+            seenBuildings.Clear();
 
-            var isAuthed = false;
-            foreach (var privledge in results)
+            Vector3 pos = player.transform.position;
+            BaseEntity.Query.Server.GetInSphere(pos, SearchRadius, blocks, BaseEntity.Query.DistanceCheckType.None);
+
+            ulong userId = player.userID;
+            int blockCount = blocks.Count;
+
+            for (int i = 0; i < blockCount; i++)
             {
-                if ((privledge.transform.position - pos).sqrMagnitude <= SearchRadius * SearchRadius)
-                {
-                    isAuthed = privledge.IsAuthed(player);
-                    break;
-                }
+                BuildingBlock? block = blocks[i];
+                if ((block.transform.position - pos).sqrMagnitude > SqrRadius) continue;
+
+                if (!seenBuildings.Add(block.buildingID)) continue;
+
+                BuildingManager.Building? building = block.GetBuilding();
+                if (building == null) continue;
+
+                BuildingPrivlidge? tc = building.GetDominatingBuildingPrivilege();
+                if (!tc || !tc.authorizedPlayers.Contains(userId)) continue;
+
+                blocks.Clear();
+                seenBuildings.Clear();
+                return true;
             }
 
-            Facepunch.Pool.FreeUnmanaged(ref results);
-            return isAuthed;
+            blocks.Clear();
+            seenBuildings.Clear();
+            return false;
         }
 
         private static string HexToRustFormat(string hex)
