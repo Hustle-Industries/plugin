@@ -998,6 +998,9 @@ namespace Oxide.Plugins
 
             public Action? OnAuthSuccess;
             public Action? OnAuthFailed;
+            
+            private Action? _cachedAuthSuccess;
+            private Action<string>? _cachedAuthError;
 
             public void CycleAuthUpdate()
             {
@@ -1006,99 +1009,99 @@ namespace Oxide.Plugins
 
             public void CheckAuthStatus()
             {
-                Action onError = () =>
+                _cachedAuthSuccess ??= HandleAuthSuccess;
+                _cachedAuthError ??= HandleAuthError;
+
+                CourtApi.GetServerInfo().Execute(_cachedAuthSuccess, _cachedAuthError);
+            }
+
+            private void HandleAuthSuccess()
+            {
+                if (IsAuthed == true)
                 {
-                    if (IsAuthed == false)
-                    {
-                        return;
-                    }
-
-                    IsAuthed = false;
-                    OnAuthFailed?.Invoke();
-                };
-
-                Action onSuccess = () =>
-                {
-                    if (IsAuthed == true)
-                    {
-                        return;
-                    }
-
-                    Log("Connection to the service established");
-
-                    IsAuthed = true;
-                    OnAuthSuccess?.Invoke();
-
-                    if (_TempWipeMarker)
-                    {
-                        _TempWipeMarker = false;
-                        CourtApi.SendWipe().Execute();
-                    }
-                };
-
-                CourtApi.GetServerInfo().Execute(() =>
-                {
-                    onSuccess();
                     return;
-                },
-                (err) =>
+                }
+
+                Log("Connection to the service established");
+
+                IsAuthed = true;
+                OnAuthSuccess?.Invoke();
+
+                if (_TempWipeMarker)
                 {
-                    // secret = ""
-                    var codeError1 = Api.ErrorContains(err, "some of required headers are wrong or missing");
-                    // secret = "123"
-                    var codeError2 = Api.ErrorContains(err, "authorization secret is corrupted");
-                    // server.ip != this.ip || server.port != this.port
-                    var codeError3 = Api.ErrorContains(err, "Check server configuration, required");
+                    _TempWipeMarker = false;
+                    CourtApi.SendWipe().Execute();
+                }
+            }
 
-                    if (codeError1 || codeError2 || codeError3)
+            private void HandleAuthFailure()
+            {
+                if (IsAuthed == false)
+                {
+                    return;
+                }
+
+                IsAuthed = false;
+                OnAuthFailed?.Invoke();
+            }
+
+            private void HandleAuthError(string err)
+            {
+                // secret = ""
+                var codeError1 = Api.ErrorContains(err, "some of required headers are wrong or missing");
+                // secret = "123"
+                var codeError2 = Api.ErrorContains(err, "authorization secret is corrupted");
+                // server.ip != this.ip || server.port != this.port
+                var codeError3 = Api.ErrorContains(err, "Check server configuration, required");
+
+                if (codeError1 || codeError2 || codeError3)
+                {
+                    if (IsAuthed != false)
                     {
-                        if (IsAuthed != false)
-                        {
-                            Error("Your server is not paired with our network, follow instructions to pair server:");
-                            Error("1. If you already start pairing, enter 'ra.pair %code%' which you get from our site");
-                            Error("2. Open servers page, press 'connect server', and enter command which you get on it");
-                        }
-
-                        onError();
-                        return;
+                        Error("Your server is not paired with our network, follow instructions to pair server:");
+                        Error("1. If you already start pairing, enter 'ra.pair %code%' which you get from our site");
+                        Error("2. Open servers page, press 'connect server', and enter command which you get on it");
                     }
 
-                    // version < minVersion
-                    var versionError1 = Api.ErrorContains(err, " is lower than minimal: ");
-                    // if we block some version
-                    var versionError2 = Api.ErrorContains(err, "This version contains serious bug, please update plugin");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    if (versionError1 || versionError2)
-                    {
-                        Error("Your plugin is outdated, you should download new version!");
-                        Error("1. Open servers page, press 'update' near server to download new version, then just replace plugin");
-                        Error("2. If you don't have 'update' button, press settings icon and choose 'download plugin' button");
+                // version < minVersion
+                var versionError1 = Api.ErrorContains(err, " is lower than minimal: ");
+                // if we block some version
+                var versionError2 = Api.ErrorContains(err, "This version contains serious bug, please update plugin");
 
-                        onError();
-                        return;
-                    }
+                if (versionError1 || versionError2)
+                {
+                    Error("Your plugin is outdated, you should download new version!");
+                    Error("1. Open servers page, press 'update' near server to download new version, then just replace plugin");
+                    Error("2. If you don't have 'update' button, press settings icon and choose 'download plugin' button");
 
-                    // if tariff finished/balance zero
-                    var paymentError1 = Api.ErrorContains(err, "У вас кончились средства на балансе проекта, пополните на");
-                    // If some limits broken
-                    var paymentError2 = Api.ErrorContains(err, "Вы превысили лимиты по");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    if (paymentError1)
-                    {
-                        Error("Your balance is not enough to continue working with our service, top-up it");
-                        onError();
-                        return;
-                    }
+                // if tariff finished/balance zero
+                var paymentError1 = Api.ErrorContains(err, "У вас кончились средства на балансе проекта, пополните на");
+                // If some limits broken
+                var paymentError2 = Api.ErrorContains(err, "Вы превысили лимиты по");
 
-                    if (paymentError2)
-                    {
-                        Error("You have reached your limits, please upgrade your plan");
-                        onError();
-                        return;
-                    }
+                if (paymentError1)
+                {
+                    Error("Your balance is not enough to continue working with our service, top-up it");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    Debug($"Unknown exception in auth: {err}");
-                });
+                if (paymentError2)
+                {
+                    Error("You have reached your limits, please upgrade your plan");
+                    HandleAuthFailure();
+                    return;
+                }
+
+                Debug($"Unknown exception in auth: {err}");
             }
         }
 
