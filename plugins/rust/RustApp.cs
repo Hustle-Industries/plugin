@@ -148,7 +148,7 @@ namespace Oxide.Plugins
                     {
                         payload = new PluginStatePlayerDto();
                         players[userid] = payload;
-                        payload.steam_id = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : userid.ToString();
+                        payload.steam_id = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : RustApp.GetSteamIdString(userid);
                         payload.steam_name = connection.username.Replace("<blank>", "blank");
                         payload.ip = IPAddressWithoutPort(connection.ipaddress);
                         payload.no_license = DetectNoLicense(connection);
@@ -1451,7 +1451,7 @@ namespace Oxide.Plugins
 
                 foreach (var connection in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { disconnect.Add(connection.userid.ToString(), "plugin-unload"); } catch { }
+                    try { disconnect.Add(GetSteamIdString(connection.userid), "plugin-unload"); } catch { }
                 }
 
                 foreach (var connection in ServerMgr.Instance.connectionQueue.queue)
@@ -1461,7 +1461,7 @@ namespace Oxide.Plugins
                         continue;
                     }
 
-                    try { disconnect.Add(connection.userid.ToString(), "plugin-unload"); } catch { }
+                    try { disconnect.Add(GetSteamIdString(connection.userid), "plugin-unload"); } catch { }
                 }
             }
 
@@ -1666,12 +1666,12 @@ namespace Oxide.Plugins
 
                 foreach (Connection? queued in ServerMgr.Instance.connectionQueue.queue)
                 {
-                    try { CheckBans(queued.userid.ToString(), IPAddressWithoutPort(queued.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(queued.userid), IPAddressWithoutPort(queued.ipaddress)); } catch { }
                 }
 
                 foreach (Connection? loading in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { CheckBans(loading.userid.ToString(), IPAddressWithoutPort(loading.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(loading.userid), IPAddressWithoutPort(loading.ipaddress)); } catch { }
                 }
             }
 
@@ -2593,7 +2593,7 @@ namespace Oxide.Plugins
                 reasonFinal = $"{reason}: {tempReason}";
             }
 
-            var steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : userid.ToString();
+            var steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : GetSteamIdString(userid);
             OnPlayerDisconnectedNormalized(steamId, reasonFinal);
 
             if (CourtApi.players.TryGetValue(userid, out var dto))
@@ -2610,7 +2610,7 @@ namespace Oxide.Plugins
 
         private void OnTeamKick(RelationshipManager.PlayerTeam team, BasePlayer player, ulong target)
         {
-            SetTeamChange(player.UserIDString, target.ToString());
+            SetTeamChange(player.UserIDString, GetSteamIdString(target));
         }
 
         private void OnTeamDisband(RelationshipManager.PlayerTeam team)
@@ -2618,7 +2618,7 @@ namespace Oxide.Plugins
             List<ulong>? members = team.members;
             for (int i = 0; i < members.Count; i++)
             {
-                string id = members[i].ToString();
+                string id = GetSteamIdString(members[i]);
                 SetTeamChange(id, id);
             }
         }
@@ -2647,7 +2647,7 @@ namespace Oxide.Plugins
             var mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(connection.userid);
             if (mute != null && mute.LeftSeconds() > 0)
             {
-                var msg = _RustApp.lang.GetMessage("System.Mute.Message.Self", _RustApp, connection.userid.ToString())
+                var msg = _RustApp.lang.GetMessage("System.Mute.Message.Self", _RustApp, GetSteamIdString(connection.userid))
                     .Replace("%REASON%", mute.reason)
                     .Replace("%TIME%", mute.GetLeftTime());
 
@@ -2716,7 +2716,7 @@ namespace Oxide.Plugins
 
             worker.AddSleepingBag(CourtApi.PluginSleepingBagDto.Create(
                 player.UserIDString,
-                targetPlayerId.ToString(),
+                GetSteamIdString(targetPlayerId),
                 bag.transform.position.ToString(),
                 player.Team?.members?.Contains(targetPlayerId) ?? false));
         }
@@ -4557,7 +4557,13 @@ namespace Oxide.Plugins
 
         private bool CloseConnection(string steamId, string reason)
         {
-            var player = BasePlayer.Find(steamId);
+            if (!ulong.TryParse(steamId, out ulong targetUserId))
+            {
+                Error($"Failed to close connection with {steamId}: {reason} (not a valid ulong)");
+                return false;
+            }
+            
+            BasePlayer? player = BasePlayer.FindByID(targetUserId);
             if (player != null && player.IsConnected)
             {
                 Log($"Closing connection with {steamId}: {reason} (by player)");
@@ -4566,29 +4572,41 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            var connection = ConnectionAuth.m_AuthConnection.Find(v => v.userid.ToString() == steamId);
-            if (connection != null)
+            List<Connection>? authList = ConnectionAuth.m_AuthConnection;
+            for (int i = 0; i < authList.Count; i++)
             {
+                Connection? c = authList[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by m_AuthConnection)");
-                Network.Net.sv.Kick(connection, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            var loading = ServerMgr.Instance.connectionQueue.joining.Find(v => v.userid.ToString() == steamId);
-            if (loading != null)
+            List<Connection>? joining = ServerMgr.Instance.connectionQueue.joining;
+            for (int i = 0; i < joining.Count; i++)
             {
+                Connection? c = joining[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by joining)");
-                Network.Net.sv.Kick(loading, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            var queued = ServerMgr.Instance.connectionQueue.queue.Find(v => v.userid.ToString() == steamId);
-            if (queued != null)
+            List<Connection>? queue = ServerMgr.Instance.connectionQueue.queue;
+            for (int i = 0; i < queue.Count; i++)
             {
+                Connection? c = queue[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by queued)");
-                Network.Net.sv.Kick(queued, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
@@ -4628,6 +4646,18 @@ namespace Oxide.Plugins
 
         public static bool IsRealSteamId(BasePlayer player)
             => player.userID >= SteamId64Base;
+        
+        private static readonly Dictionary<ulong, string> _steamIdStringCache = new();
+
+        public static string GetSteamIdString(ulong userId)
+        {
+            if (_steamIdStringCache.TryGetValue(userId, out string? cached))
+                return cached;
+
+            string s = userId.ToString();
+            _steamIdStringCache[userId] = s;
+            return s;
+        }
 
         private double CurrentTime() => DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
 
