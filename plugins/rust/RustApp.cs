@@ -1433,7 +1433,7 @@ namespace Oxide.Plugins
 
         private class BanWorker : RustAppWorker
         {
-            private List<BanApi.BanGetBatchEntryPayloadDto> BanUpdateQueue = new List<BanApi.BanGetBatchEntryPayloadDto>();
+            private readonly Dictionary<string, BanApi.BanGetBatchEntryPayloadDto> BanUpdateQueue = new();
 
             public void Awake()
             {
@@ -1469,21 +1469,17 @@ namespace Oxide.Plugins
 
             public void CheckBans(string steamId, string ip)
             {
-                // Provide an option to bypass ban checks enforced by external plugins
-                var over = Interface.Oxide.CallHook("RustApp_CanIgnoreBan", steamId);
+                object? over = Interface.Oxide.CallHook("RustApp_CanIgnoreBan", steamId);
                 if (over != null)
+                    return;
+
+                if (BanUpdateQueue.TryGetValue(steamId, out BanApi.BanGetBatchEntryPayloadDto? existing))
                 {
+                    existing.ip = ip;
                     return;
                 }
 
-                var exists = BanUpdateQueue.Find(v => v.steam_id == steamId);
-                if (exists != null)
-                {
-                    exists.ip = ip;
-                    return;
-                }
-
-                BanUpdateQueue.Add(new BanApi.BanGetBatchEntryPayloadDto { steam_id = steamId, ip = ip });
+                BanUpdateQueue[steamId] = new BanApi.BanGetBatchEntryPayloadDto { steam_id = steamId, ip = ip };
             }
 
             private void CycleBanUpdate()
@@ -1495,32 +1491,18 @@ namespace Oxide.Plugins
 
                 CycleBanUpdateWrapper((steamId, ban) =>
                 {
-                    var queuePosition = BanUpdateQueue.Find(v => v.steam_id == steamId);
-                    if (queuePosition != null)
-                    {
-                        BanUpdateQueue.Remove(queuePosition);
-                    }
+                    BanUpdateQueue.Remove(steamId);
 
                     if (ban == null)
-                    {
                         return;
-                    }
 
                     if (ban.sync_project_id != 0 && !ban.sync_should_kick)
-                    {
                         return;
-                    }
 
                     if (ban.steam_id == steamId)
-                    {
-                        // Ban is directly to this steamId
                         ReactOnDirectBan(steamId, ban);
-                    }
                     else
-                    {
-                        // Ban was found by IP
                         ReactOnIpBan(steamId, ban);
-                    }
                 });
             }
 
@@ -1531,24 +1513,54 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new BanApi.BanGetBatchPayload { players = Pool.Get<List<BanApi.BanGetBatchEntryPayloadDto>>() };
-                payload.players.AddRange(BanUpdateQueue);
+                BanApi.BanGetBatchPayload payload = new() { players = Pool.Get<List<BanApi.BanGetBatchEntryPayloadDto>>() };
+                foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
+                {
+                    payload.players.Add(entry);
+                }
                 BanUpdateQueue.Clear();
 
                 BanApi.BanGetBatch(payload).Execute((data) =>
                 {
-                    payload.players.ForEach(originalPlayer =>
+                    Dictionary<string, BanApi.BanGetBatchEntryResponseDto>? entriesByPid = Pool.Get<Dictionary<string, BanApi.BanGetBatchEntryResponseDto>>();
+                    if (data?.entries != null)
                     {
-                        var exists = data?.entries?.Find(banPlayer => banPlayer.steam_id == originalPlayer.steam_id);
-                        var ban = exists?.bans?.FirstOrDefault(v => v.computed_is_active);
-                        callback.Invoke(originalPlayer.steam_id, ban);
-                    });
+                        for (int i = 0; i < data.entries.Count; i++)
+                        {
+                            BanApi.BanGetBatchEntryResponseDto? e = data.entries[i];
+                            if (e?.steam_id != null) entriesByPid[e.steam_id] = e;
+                        }
+                    }
+
+                    for (int i = 0; i < payload.players.Count; i++)
+                    {
+                        BanApi.BanGetBatchEntryPayloadDto? originalPlayer = payload.players[i];
+                        BanApi.BanDto active = null;
+                        if (entriesByPid.TryGetValue(originalPlayer.steam_id, out BanApi.BanGetBatchEntryResponseDto? entry) && entry.bans != null)
+                        {
+                            for (int j = 0; j < entry.bans.Count; j++)
+                            {
+                                if (entry.bans[j].computed_is_active)
+                                {
+                                    active = entry.bans[j];
+                                    break;
+                                }
+                            }
+                        }
+                        callback.Invoke(originalPlayer.steam_id, active);
+                    }
+
+                    Pool.FreeUnmanaged(ref entriesByPid);
                     Pool.FreeUnmanaged(ref payload.players);
                 },
                 (_) =>
                 {
                     Error($"Failed to process ban checks ({payload.players.Count}), retrying...");
-                    BanUpdateQueue.AddRange(payload.players);
+                    for (int i = 0; i < payload.players.Count; i++)
+                    {
+                        BanApi.BanGetBatchEntryPayloadDto? p = payload.players[i];
+                        BanUpdateQueue.TryAdd(p.steam_id, p);
+                    }
                     Pool.FreeUnmanaged(ref payload.players);
                 });
             }
