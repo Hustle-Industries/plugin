@@ -2152,6 +2152,8 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            _tempDisconnectReasons.Clear();
+
             RustAppEngineDestroy();
             DestroyAllUi();
         }
@@ -2278,11 +2280,16 @@ namespace Oxide.Plugins
 
         private void CanUserLogin(string name, string id, string ipAddress)
         {
+            if (ulong.TryParse(id, out ulong userid))
+                _tempDisconnectReasons.Remove(userid);
+
             OnPlayerConnectedNormalized(id, IPAddressWithoutPort(ipAddress));
         }
 
         private void OnPlayerConnected(BasePlayer player)
         {
+            _tempDisconnectReasons.Remove(player.userID);
+
             OnPlayerConnectedNormalized(player.UserIDString, IPAddressWithoutPort(player.Connection.ipaddress));
         }
 
