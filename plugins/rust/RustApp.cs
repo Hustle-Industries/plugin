@@ -347,17 +347,40 @@ namespace Oxide.Plugins
 
             #region Sleeping bag
 
-            public class PluginSleepingBagDto
+            public class PluginSleepingBagDto : Pool.IPooled
             {
                 public string initiator_steam_id;
                 public string target_steam_id;
                 public string position;
                 public bool are_friends;
+
+                public static PluginSleepingBagDto Create(string initiatorSteamId, string targetSteamId, string position, bool areFriends)
+                {
+                    PluginSleepingBagDto? dto = Pool.Get<PluginSleepingBagDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.position = position;
+                    dto.are_friends = areFriends;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    position = null;
+                    are_friends = false;
+                }
             }
 
-            public class PluginSleepingBagBatchDto
+            public class PluginSleepingBagBatchDto : Pool.IPooled
             {
-                public List<PluginSleepingBagDto> sleeping_bags = new List<PluginSleepingBagDto>();
+                public List<PluginSleepingBagDto> sleeping_bags;
+
+                public void LeavePool() => sleeping_bags = Pool.Get<List<PluginSleepingBagDto>>();
+                public void EnterPool() => Pool.FreeUnmanaged(ref sleeping_bags);
             }
 
             public static StableRequest<object> SleepingBagCreate(PluginSleepingBagBatchDto payload)
@@ -1897,9 +1920,9 @@ namespace Oxide.Plugins
 
         private class SleepingBagWorker : RustAppWorker
         {
-            public List<CourtApi.PluginSleepingBagDto> SleepingBags = new List<CourtApi.PluginSleepingBagDto>();
+            public List<CourtApi.PluginSleepingBagDto> SleepingBags = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1918,23 +1941,33 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginSleepingBagBatchDto
-                {
-                    sleeping_bags = Pool.Get<List<CourtApi.PluginSleepingBagDto>>()
-                };
-
+                CourtApi.PluginSleepingBagBatchDto? payload = Pool.Get<CourtApi.PluginSleepingBagBatchDto>();
                 payload.sleeping_bags.AddRange(SleepingBags);
                 SleepingBags.Clear();
 
                 CourtApi.SleepingBagCreate(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.sleeping_bags);
+                    Pool.Free(ref payload.sleeping_bags, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     SleepingBags.AddRange(payload.sleeping_bags);
-                    Pool.FreeUnmanaged(ref payload.sleeping_bags);
+                    payload.sleeping_bags.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < SleepingBags.Count; i++)
+                {
+                    CourtApi.PluginSleepingBagDto? item = SleepingBags[i];
+                    Pool.Free(ref item);
+                }
+                SleepingBags.Clear();
             }
         }
 
@@ -2544,14 +2577,14 @@ namespace Oxide.Plugins
 
         private void CanAssignBed(BasePlayer player, SleepingBag bag, ulong targetPlayerId)
         {
-            _RustAppEngine?.SleepingBagWorker?.AddSleepingBag(new CourtApi.PluginSleepingBagDto
-            {
-                initiator_steam_id = player.UserIDString,
-                target_steam_id = targetPlayerId.ToString(),
+            SleepingBagWorker? worker = _RustAppEngine?.SleepingBagWorker;
+            if (worker == null) return;
 
-                position = bag.transform.position.ToString(),
-                are_friends = player.Team?.members?.Contains(targetPlayerId) ?? false
-            });
+            worker.AddSleepingBag(CourtApi.PluginSleepingBagDto.Create(
+                player.UserIDString,
+                targetPlayerId.ToString(),
+                bag.transform.position.ToString(),
+                player.Team?.members?.Contains(targetPlayerId) ?? false));
         }
 
         #endregion
