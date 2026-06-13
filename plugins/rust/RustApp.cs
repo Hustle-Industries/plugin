@@ -697,16 +697,38 @@ namespace Oxide.Plugins
 
             #region PlayerMuteCreate
 
-            public class PlayerMuteCreateDto
+            public class PlayerMuteCreateDto : Pool.IPooled
             {
                 public string target_steam_id;
                 public string reason;
                 public string duration;
-
                 public bool broadcast;
+                public string? comment;
+                public string? references_message;
 
-                [CanBeNull] public string comment;
-                [CanBeNull] public string references_message;
+                public static PlayerMuteCreateDto Create(string targetSteamId, string reason, string duration, bool broadcast = false, string? comment = null, string? referencesMessage = null)
+                {
+                    PlayerMuteCreateDto? dto = Pool.Get<PlayerMuteCreateDto>();
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.duration = duration;
+                    dto.broadcast = broadcast;
+                    dto.comment = comment;
+                    dto.references_message = referencesMessage;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    target_steam_id = null;
+                    reason = null;
+                    duration = null;
+                    broadcast = false;
+                    comment = null;
+                    references_message = null;
+                }
             }
 
             public static StableRequest<object> PlayerMuteCreate(PlayerMuteCreateDto data)
@@ -718,9 +740,19 @@ namespace Oxide.Plugins
 
             #region PlayerMuteDelete
 
-            public class PlayerMuteDeleteDto
+            public class PlayerMuteDeleteDto : Pool.IPooled
             {
                 public string target_steam_id;
+
+                public static PlayerMuteDeleteDto Create(string targetSteamId)
+                {
+                    PlayerMuteDeleteDto? dto = Pool.Get<PlayerMuteDeleteDto>();
+                    dto.target_steam_id = targetSteamId;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool() => target_steam_id = null;
             }
 
             public static StableRequest<object> PlayerMuteDelete(PlayerMuteDeleteDto data)
@@ -4117,46 +4149,29 @@ namespace Oxide.Plugins
 
         private void RustApp_PlayerMuteCreate(string targetSteamId, string reason, string duration, string comment = null, string referenceMessageText = null, bool broadcast = false)
         {
-            var request = CourtApi.PlayerMuteCreate(new CourtApi.PlayerMuteCreateDto
-            {
-                target_steam_id = targetSteamId,
-                reason = reason,
-                broadcast = broadcast,
-                comment = comment,
-                duration = duration,
-                references_message = referenceMessageText
-            });
+            CourtApi.PlayerMuteCreateDto? payload = CourtApi.PlayerMuteCreateDto.Create(targetSteamId, reason, duration, broadcast, comment, referenceMessageText);
 
-            request.Execute(() =>
-            {
-                Puts($"Player ({targetSteamId}) is muted");
-            },
-            (err) =>
-            {
-                PrintError($"Failed to mute player: {err}");
-            });
+            CourtApi.PlayerMuteCreate(payload).Execute(
+                () => Puts($"Player ({targetSteamId}) is muted"),
+                (err) => PrintError($"Failed to mute player: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private void RustApp_PlayerMuteDelete(string targetSteamId)
         {
-            var request = CourtApi.PlayerMuteDelete(new CourtApi.PlayerMuteDeleteDto
-            {
-                target_steam_id = targetSteamId
-            });
+            CourtApi.PlayerMuteDeleteDto? payload = CourtApi.PlayerMuteDeleteDto.Create(targetSteamId);
 
-            request.Execute(() =>
-            {
-                Puts($"Player ({targetSteamId}) is unmuted");
-            },
-            (err) =>
-            {
-                PrintError($"Failed to unmute player: {err}");
-            });
+            CourtApi.PlayerMuteDelete(payload).Execute(
+                () => Puts($"Player ({targetSteamId}) is unmuted"),
+                (err) => PrintError($"Failed to unmute player: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private long? RA_IsPlayerMuted(BasePlayer player)
         {
-            var mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(player.userID);
+            CourtApi.PlayerMuteDto? mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(player.userID);
 
             return mute?.LeftSeconds();
         }
