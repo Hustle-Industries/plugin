@@ -392,14 +392,38 @@ namespace Oxide.Plugins
 
             #region BanCreate
 
-            public class PluginBanCreatePayload
+            public class PluginBanCreatePayload : Pool.IPooled
             {
                 public string target_steam_id;
                 public string reason;
                 public bool global;
                 public bool ban_ip;
-                public string duration;
-                public string comment;
+                public string? duration;
+                public string? comment;
+
+                public static PluginBanCreatePayload Create(string targetSteamId, string reason, string? duration, bool global, bool banIp, string comment)
+                {
+                    PluginBanCreatePayload? dto = Pool.Get<PluginBanCreatePayload>();
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.duration = duration;
+                    dto.global = global;
+                    dto.ban_ip = banIp;
+                    dto.comment = comment;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    target_steam_id = null;
+                    reason = null;
+                    duration = null;
+                    global = false;
+                    ban_ip = false;
+                    comment = null;
+                }
             }
 
             public static StableRequest<object> BanCreate(PluginBanCreatePayload payload)
@@ -2219,15 +2243,8 @@ namespace Oxide.Plugins
             string reason = args.GetString(1);
             string duration = args.GetString(2);
 
-            BanCreate(steamId, new CourtApi.PluginBanCreatePayload
-            {
-                target_steam_id = steamId,
-                reason = reason,
-                global = global,
-                ban_ip = banIp,
-                duration = duration.Length > 0 ? duration : null,
-                comment = "Ban via console"
-            });
+            BanCreate(steamId, CourtApi.PluginBanCreatePayload.Create(
+                steamId, reason, duration.Length > 0 ? duration : null, global, banIp, "Ban via console"));
         }
 
         [ConsoleCommand("ra.unban")]
@@ -3819,14 +3836,13 @@ namespace Oxide.Plugins
 
         private void BanCreate(string steamId, CourtApi.PluginBanCreatePayload payload)
         {
-            CourtApi.BanCreate(payload).Execute(() =>
-            {
-                Log($"Player {steamId} banned for {payload.reason}");
-            },
-            (err) =>
-            {
-                Error($"Failed to ban {steamId}. Reason: {err}");
-            });
+            string reason = payload.reason;
+
+            CourtApi.BanCreate(payload).Execute(
+                () => Log($"Player {steamId} banned for {reason}"),
+                (err) => Error($"Failed to ban {steamId}. Reason: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private void BanDelete(string steamId)
@@ -4202,15 +4218,8 @@ namespace Oxide.Plugins
 
         private void RA_BanPlayer(string steam_id, string reason, string duration, bool global, bool ban_ip, string comment = "")
         {
-            BanCreate(steam_id, new CourtApi.PluginBanCreatePayload
-            {
-                reason = reason,
-                ban_ip = ban_ip,
-                comment = comment,
-                global = global,
-                target_steam_id = steam_id,
-                duration = duration.Length > 0 ? duration : null
-            });
+            BanCreate(steam_id, CourtApi.PluginBanCreatePayload.Create(
+                steam_id, reason, duration.Length > 0 ? duration : null, global, ban_ip, comment));
         }
 
         private void RA_CreateAlert(Plugin plugin, string message, object data = null, object meta = null)
