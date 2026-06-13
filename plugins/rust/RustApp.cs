@@ -3380,8 +3380,7 @@ namespace Oxide.Plugins
                       Command = UICommand((player, args, input) => {
                         DrawReportInterface(player, args.page, args.search, true);
 
-                        Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-                        EffectNetwork.Send(effect, player.Connection);
+                        PlayEffect(player, FxButtonUnpress);
                       }, new { search = search, page = hasNextPage ? page + 1 : page }, "nextPageGo")
                     },
                     Text = { Text = "↓", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasNextPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
@@ -3395,8 +3394,7 @@ namespace Oxide.Plugins
                       Command = UICommand((player, args, input) => {
                         DrawReportInterface(player, args.page, args.search, true);
 
-                        Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-                        EffectNetwork.Send(effect, player.Connection);
+                        PlayEffect(player, FxButtonUnpress);
                       }, new { search = search, page = hasPrevPage ? page - 1 : 0 }, "prevPageGo")
                     },
                     Text = { Text = "↑", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasPrevPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
@@ -3572,8 +3570,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxButtonUnpress);
 
             CuiElementContainer container = new CuiElementContainer();
             CuiHelper.DestroyUi(player, ReportLayer + $".T");
@@ -3700,8 +3697,7 @@ namespace Oxide.Plugins
 
             CuiHelper.AddUi(player, container);
 
-            Effect effect = new Effect("ASSETS/BUNDLED/PREFABS/FX/INVITE_NOTICE.PREFAB".ToLower(), player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxInviteNotice);
         }
 
         #endregion
@@ -4379,10 +4375,21 @@ namespace Oxide.Plugins
             Error = 1
         }
 
+        private const string FxToastSelect = "assets/bundled/prefabs/fx/notice/item.select.fx.prefab";
+        private const string FxButtonUnpress = "assets/prefabs/tools/detonator/effects/unpress.prefab";
+        private const string FxInviteNotice = "assets/bundled/prefabs/fx/invite_notice.prefab";
+
+        private static void PlayEffect(BasePlayer player, string prefabPath)
+        {
+            Effect? effect = Effect.reusableInstance;
+            effect.Init(Effect.Type.Generic, player, 0, Vector3.zero, Vector3.zero);
+            effect.pooledString = prefabPath;
+            EffectNetwork.Send(effect, player.Connection);
+        }
+
         private void SoundToast(BasePlayer player, string text, SoundToastType type)
         {
-            Effect effect = new Effect("assets/bundled/prefabs/fx/notice/item.select.fx.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxToastSelect);
 
             player.Command("gametip.showtoast", (int)type, text, 1);
         }
