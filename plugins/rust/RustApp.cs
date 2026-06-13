@@ -28,7 +28,7 @@ using Star = ProtoBuf.PatternFirework.Star;
 
 namespace Oxide.Plugins
 {
-    [Info("RustApp", "RustApp.io", "2.6.1")]
+    [Info("RustApp", "RustApp.io", "2.6.2")]
     public class RustApp : RustPlugin
     {
         #region Variables
@@ -3053,246 +3053,275 @@ namespace Oxide.Plugins
         #endregion
 
         #region Interface
-
+        
         private const string ReportLayer = "UI_RP_ReportPanelUI";
+        private const string CheckLayer = "RP_PrivateLayer";
 
         private void DrawReportInterface(BasePlayer player, int page = 0, string search = "", bool redraw = false)
         {
-            var lineAmount = 6;
-            var lineMargin = 8;
-
-            var size = (float)(700 - lineMargin * lineAmount) / lineAmount;
-
-            var list = BasePlayer.activePlayerList
-                .ToList();
-
-            var finalList = list
-                .FindAll(v => v.displayName.ToLower().Contains(search) || v.UserIDString.ToLower().Contains(search) || search == null);
-
-            finalList = finalList
-                .Skip(page * 18)
-                .Take(18)
-                .ToList();
-
-            if (finalList.Count() == 0)
+            const int ColumnCount = 6;
+            const int PageSize = 18;
+            const int MinRows = 3;
+            const int LineMargin = 8;
+            const float size = (float)(700 - LineMargin * ColumnCount) / ColumnCount;
+            
+            bool hasSearch = !string.IsNullOrEmpty(search);
+            List<BasePlayer> filtered = Pool.Get<List<BasePlayer>>();
+            try
             {
-                if (search == null)
+                ListHashSet<BasePlayer>? src = BasePlayer.activePlayerList;
+                if (!hasSearch)
+                {
+                    for (int i = 0; i < src.Count; i++) filtered.Add(src[i]);
+                }
+                else
+                {
+                    for (int i = 0; i < src.Count; i++)
+                    {
+                        BasePlayer? p = src[i];
+                        if (p.displayName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                         || p.UserIDString.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                            filtered.Add(p);
+                    }
+                }
+
+                int total = filtered.Count;
+                int start = page * PageSize;
+                int end = Math.Min(start + PageSize, total);
+                int shown = Math.Max(0, end - start);
+
+                if (shown == 0 && !hasSearch && page > 0)
                 {
                     DrawReportInterface(player, page - 1);
                     return;
                 }
-            }
 
-            CuiElementContainer container = new CuiElementContainer();
+                bool hasNextPage = total > end;
+                bool hasPrevPage = page > 0;
 
-            if (!redraw)
-            {
+                double nowTs = CurrentTime();
+                double checkExpireSeconds = _Settings.report_ui_show_check_in * 24 * 60 * 60;
+
+                CuiElementContainer container = new CuiElementContainer();
+
+                if (!redraw)
+                {
+                    container.Add(new CuiPanel
+                    {
+                        CursorEnabled = true,
+                        RectTransform = { OffsetMax = "0 0" },
+                        Image = { Color = "0 0 0 0.8", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+                    }, "Overlay", ReportLayer, ReportLayer);
+                    
+                    container.Add(new CuiButton()
+                    {
+                        RectTransform = { OffsetMax = "0 0" },
+                        Button = { Color = "0.20 0.20 0.20 1.00", Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Close = ReportLayer },
+                        Text = { Text = "" }
+                    }, ReportLayer);
+                }
+
                 container.Add(new CuiPanel
                 {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                    Image = { Color = "0 0 0 0.8", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
-                }, "Overlay", ReportLayer, ReportLayer);
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-368 -200", OffsetMax = "368 142" },
+                    Image = { Color = "1 0 0 0" }
+                }, ReportLayer, ReportLayer + ".C", ReportLayer + ".C");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "1 0", OffsetMin = "-36 0", OffsetMax = "0 0" },
+                    Image = { Color = "0 0 1 0" }
+                }, ReportLayer + ".C", ReportLayer + ".R");
 
                 container.Add(new CuiButton()
                 {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                    Button = { Color = HexToRustFormat("#343434"), Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Close = ReportLayer },
-                    Text = { Text = "" }
-                }, ReportLayer);
-            }
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.5", OffsetMin = "0 0", OffsetMax = "0 -4" },
+                    Button = {
+                      Color = hasNextPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
+                      Command = UICommand((player, args, input) => {
+                        DrawReportInterface(player, args.page, args.search, true);
 
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-368 -200", OffsetMax = "368 142" },
-                Image = { Color = "1 0 0 0" }
-            }, ReportLayer, ReportLayer + ".C", ReportLayer + ".C");
+                        Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
+                        EffectNetwork.Send(effect, player.Connection);
+                      }, new { search = search, page = hasNextPage ? page + 1 : page }, "nextPageGo")
+                    },
+                    Text = { Text = "↓", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasNextPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
+                }, ReportLayer + ".R", ReportLayer + ".RD");
 
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 1", OffsetMin = "-36 0", OffsetMax = "0 0" },
-                Image = { Color = "0 0 1 0" }
-            }, ReportLayer + ".C", ReportLayer + ".R");
-
-            container.Add(new CuiButton()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.5", OffsetMin = "0 0", OffsetMax = "0 -4" },
-                Button = {
-          Color = HexToRustFormat($"#{(list.Count > 18 && finalList.Count() == 18 ? "D0C6BD4D" : "D0C6BD33")}"),
-          Command = UICommand((player, args, input) => {
-            DrawReportInterface(player, args.page, args.search, true);
-
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
-          }, new { search = search, page = list.Count > 18 && finalList.Count() == 18 ? page + 1 : page }, "nextPageGo")
-        },
-                Text = { Text = "↓", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 24, Color = HexToRustFormat($"{(list.Count > 18 && finalList.Count() == 18 ? "D0C6BD" : "D0C6BD4D")}") }
-            }, ReportLayer + ".R", ReportLayer + ".RD");
-
-            container.Add(new CuiButton()
-            {
-                RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = "0 4", OffsetMax = "0 0" },
-                Button = {
-          Color = HexToRustFormat($"#{(page == 0 ? "D0C6BD33" : "D0C6BD4D")}"),
-          Command = UICommand((player, args, input) => {
-            DrawReportInterface(player, args.page, args.search, true);
-
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
-          }, new { search = search, page = page == 0 ? 0 : page - 1 }, "prevPageGo")
-        },
-                Text = { Text = "↑", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 24, Color = HexToRustFormat($"{(page == 0 ? "D0C6BD4D" : "D0C6BD")}") }
-            }, ReportLayer + ".R", ReportLayer + ".RU");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "1 1", AnchorMax = "1 1", OffsetMin = "-250 8", OffsetMax = "0 43" },
-                Image = { Color = HexToRustFormat("#D0C6BD33") }
-            }, ReportLayer + ".C", ReportLayer + ".S");
-
-            var searchCommand = UICommand((player, args, input) =>
-            {
-                DrawReportInterface(player, 0, input, true);
-            }, new { }, "searchForPlayer");
-
-            container.Add(new CuiElement
-            {
-                Parent = ReportLayer + ".S",
-                Components =
-          {
-              new CuiInputFieldComponent {
-                Text = $"{lang.GetMessage("Header.Search.Placeholder", this, player.UserIDString)}",
-                FontSize = 14,
-                Font = "robotocondensed-regular.ttf",
-                Color = HexToRustFormat("#D0C6BD80"),
-                Align = TextAnchor.MiddleLeft,
-                Command = searchCommand,
-                NeedsKeyboard = true
-              },
-              new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "10 0", OffsetMax = "-85 0"}
-          }
-            });
-
-            container.Add(new CuiButton
-            {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 1", OffsetMin = "-75 0", OffsetMax = "0 0" },
-                Button = { Color = HexToRustFormat("#D0C6BD"), Material = "assets/icons/greyout.mat" },
-                Text = { Text = $"{lang.GetMessage("Header.Search", this, player.UserIDString)}", Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#443F3B"), FontSize = 14, Align = TextAnchor.MiddleCenter }
-            }, ReportLayer + ".S", ReportLayer + ".SB");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0 1", AnchorMax = "0.5 1", OffsetMin = "0 7", OffsetMax = "0 47" },
-                Image = { Color = "0.8 0.8 0.8 0" }
-            }, ReportLayer + ".C", ReportLayer + ".LT");
-
-            container.Add(new CuiLabel()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                Text = { Text = $"{lang.GetMessage("Header.Find", this, player.UserIDString)} {(search != null && search.Length > 0 ? $"- {(search.Length > 20 ? search.Substring(0, 14).ToUpper() + "..." : search.ToUpper())}" : "")}", Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#D0C6BD"), FontSize = 24, Align = TextAnchor.UpperLeft }
-            }, ReportLayer + ".LT");
-
-            container.Add(new CuiLabel()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                Text = { Text = search == null || search.Length == 0 ? lang.GetMessage("Header.SubDefault", this, player.UserIDString) : finalList.Count() == 0 ? lang.GetMessage("Header.SubFindEmpty", this, player.UserIDString) : lang.GetMessage("Header.SubFindResults", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat("#D0C6BD4D"), FontSize = 14, Align = TextAnchor.LowerLeft }
-            }, ReportLayer + ".LT");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "-40 0" },
-                Image = { Color = "0 1 0 0" }
-            }, ReportLayer + ".C", ReportLayer + ".L");
-
-            for (var y = 0; y < Math.Max((int)Math.Ceiling((float)finalList.Count / lineAmount), 3); y++)
-            {
-                for (var x = 0; x < 6; x++)
+                container.Add(new CuiButton()
                 {
-                    var target = finalList.ElementAtOrDefault(y * 6 + x);
-                    if (target)
+                    RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = "0 4", OffsetMax = "0 0" },
+                    Button = {
+                      Color = hasPrevPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
+                      Command = UICommand((player, args, input) => {
+                        DrawReportInterface(player, args.page, args.search, true);
+
+                        Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
+                        EffectNetwork.Send(effect, player.Connection);
+                      }, new { search = search, page = hasPrevPage ? page - 1 : 0 }, "prevPageGo")
+                    },
+                    Text = { Text = "↑", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasPrevPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
+                }, ReportLayer + ".R", ReportLayer + ".RU");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "1 1", OffsetMin = "-250 8", OffsetMax = "0 43" },
+                    Image = { Color = "0.816 0.776 0.741 0.2" }
+                }, ReportLayer + ".C", ReportLayer + ".S");
+
+                string searchCommand = UICommand((player, args, input) =>
+                {
+                    DrawReportInterface(player, 0, input, true);
+                }, new { }, "searchForPlayer");
+
+                container.Add(new CuiElement
+                {
+                    Parent = ReportLayer + ".S",
+                    Components =
                     {
-                        container.Add(new CuiPanel
+                        new CuiInputFieldComponent {
+                            Text = $"{lang.GetMessage("Header.Search.Placeholder", this, player.UserIDString)}",
+                            FontSize = 14,
+                            Font = "robotocondensed-regular.ttf",
+                            Color = "0.816 0.776 0.741 0.5",
+                            Align = TextAnchor.MiddleLeft,
+                            Command = searchCommand,
+                            NeedsKeyboard = true
+                        },
+                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "10 0", OffsetMax = "-85 0"}
+                    }
+                });
+
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = "1 0", OffsetMin = "-75 0", OffsetMax = "0 0" },
+                    Button = { Color = "0.816 0.776 0.741", Material = "assets/icons/greyout.mat" },
+                    Text = { Text = $"{lang.GetMessage("Header.Search", this, player.UserIDString)}", Color = "0.267 0.247 0.231", Align = TextAnchor.MiddleCenter }
+                }, ReportLayer + ".S", ReportLayer + ".SB");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "0 1", AnchorMax = "0.5 1", OffsetMin = "0 7", OffsetMax = "0 47" },
+                    Image = { Color = "0.8 0.8 0.8 0" }
+                }, ReportLayer + ".C", ReportLayer + ".LT");
+
+                container.Add(new CuiLabel()
+                {
+                    RectTransform = { OffsetMax = "0 0" },
+                    Text = { Text = $"{lang.GetMessage("Header.Find", this, player.UserIDString)} {(hasSearch ? $"- {(search.Length > 20 ? search.Substring(0, 14).ToUpper() + "..." : search.ToUpper())}" : "")}", Color = "0.816 0.776 0.741", FontSize = 24, Align = TextAnchor.UpperLeft }
+                }, ReportLayer + ".LT");
+
+                container.Add(new CuiLabel()
+                {
+                    RectTransform = { OffsetMax = "0 0" },
+                    Text = { Text = !hasSearch ? lang.GetMessage("Header.SubDefault", this, player.UserIDString) : total == 0 ? lang.GetMessage("Header.SubFindEmpty", this, player.UserIDString) : lang.GetMessage("Header.SubFindResults", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = "0.816 0.776 0.741 0.3", Align = TextAnchor.LowerLeft }
+                }, ReportLayer + ".LT");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { OffsetMax = "-40 0" },
+                    Image = { Color = "0 1 0 0" }
+                }, ReportLayer + ".C", ReportLayer + ".L");
+
+                int rowCount = Math.Max((shown + ColumnCount - 1) / ColumnCount, MinRows);
+                for (int y = 0; y < rowCount; y++)
+                {
+                    for (int x = 0; x < ColumnCount; x++)
+                    {
+                        int idx = start + y * ColumnCount + x;
+                        BasePlayer? target = idx < end ? filtered[idx] : null;
+
+                        if (target != null)
                         {
-                            RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}", OffsetMax = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}" },
-                            Image = { Color = HexToRustFormat("#D0C6BD33") }
-                        }, ReportLayer + ".L", ReportLayer + $".{target.UserIDString}");
+                            string? targetId = target.UserIDString;
 
-                        container.Add(new CuiElement
-                        {
-                            Parent = ReportLayer + $".{target.UserIDString}",
-                            Components =
-              {
-                // Do not change in devblogs
-                new CuiRawImageComponent { SteamId= target.UserIDString, Sprite = "assets/icons/loading.png" },
-                new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
-              }
-                        });
-
-                        container.Add(new CuiPanel()
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                            Image = { Sprite = "assets/content/ui/ui.background.transparent.linear.psd", Color = HexToRustFormat("#282828f2") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        string normaliseName = NormalizeString(target.displayName);
-
-                        string name = normaliseName.Length > 14 ? normaliseName.Substring(0, 15) + ".." : normaliseName;
-
-                        container.Add(new CuiLabel
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "6 16", OffsetMax = "0 0" },
-                            Text = { Text = name, Align = TextAnchor.LowerLeft, Font = "robotocondensed-bold.ttf", FontSize = 13, Color = HexToRustFormat("#D0C6BD") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        container.Add(new CuiLabel
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "6 5", OffsetMax = "0 0" },
-                            Text = { Text = target.UserIDString, Align = TextAnchor.LowerLeft, Font = "robotocondensed-regular.ttf", FontSize = 10, Color = HexToRustFormat("#D0C6BD80") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        var min = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}";
-                        var max = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}";
-
-                        var showPlayerCommand = UICommand((player, args, input) =>
-                        {
-                            DrawPlayerReportReasons(player, args.steam_id, args.min, args.max, args.left);
-                        }, new { steam_id = target.UserIDString, min, max, left = x >= 3 }, "showPlayerReportReasons");
-
-                        container.Add(new CuiButton()
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                            Button = { Color = "0 0 0 0", Command = showPlayerCommand },
-                            Text = { Text = "" }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        var was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
-                        if (was_checked)
-                        {
                             container.Add(new CuiPanel
                             {
-                                RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
-                                Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
-                            }, ReportLayer + $".{target.UserIDString}", ReportLayer + $".{target.UserIDString}.Recent");
+                                RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}", OffsetMax = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}" },
+                                Image = { Color = "0.816 0.776 0.741 0.2" }
+                            }, ReportLayer + ".L", ReportLayer + $".{targetId}");
+
+                            container.Add(new CuiElement
+                            {
+                                Parent = ReportLayer + $".{targetId}",
+                                Components =
+                                {
+                                    // Do not change in devblogs
+                                    new CuiRawImageComponent { SteamId = targetId, Sprite = "assets/icons/loading.png" },
+                                    new CuiRectTransformComponent { OffsetMax = "0 0" }
+                                }
+                            });
+
+                            container.Add(new CuiPanel()
+                            {
+                                RectTransform = { OffsetMax = "0 0" },
+                                Image = { Sprite = "assets/content/ui/ui.background.transparent.linear.psd", Color = "0.157 0.157 0.157 0.95" }
+                            }, ReportLayer + $".{targetId}");
+
+                            string normaliseName = NormalizeString(target.displayName);
+                            string name = normaliseName.Length > 14 ? normaliseName.Substring(0, 15) + ".." : normaliseName;
 
                             container.Add(new CuiLabel
                             {
-                                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                                Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
-                            }, ReportLayer + $".{target.UserIDString}.Recent");
+                                RectTransform = { OffsetMin = "6 16", OffsetMax = "0 0" },
+                                Text = { Text = name, Align = TextAnchor.LowerLeft, FontSize = 13, Color = "0.816 0.776 0.741" }
+                            }, ReportLayer + $".{targetId}");
+
+                            container.Add(new CuiLabel
+                            {
+                                RectTransform = { OffsetMin = "6 5", OffsetMax = "0 0" },
+                                Text = { Text = targetId, Align = TextAnchor.LowerLeft, Font = "robotocondensed-regular.ttf", FontSize = 10, Color = "0.816 0.776 0.741 0.5" }
+                            }, ReportLayer + $".{targetId}");
+
+                            string min = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}";
+                            string max = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}";
+
+                            string showPlayerCommand = UICommand((player, args, input) =>
+                            {
+                                DrawPlayerReportReasons(player, args.steam_id, args.min, args.max, args.left);
+                            }, new { steam_id = targetId, min, max, left = x >= 3 }, "showPlayerReportReasons");
+
+                            container.Add(new CuiButton()
+                            {
+                                RectTransform = { OffsetMax = "0 0" },
+                                Button = { Color = "0 0 0 0", Command = showPlayerCommand },
+                                Text = { Text = "" }
+                            }, ReportLayer + $".{targetId}");
+
+                            bool wasChecked = _CheckInfo.LastChecks.TryGetValue(targetId, out double lastCheck)
+                                              && nowTs - lastCheck < checkExpireSeconds;
+                            if (wasChecked)
+                            {
+                                container.Add(new CuiPanel
+                                {
+                                    RectTransform = { AnchorMin = "0 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
+                                    Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
+                                }, ReportLayer + $".{targetId}", ReportLayer + $".{targetId}.Recent");
+
+                                container.Add(new CuiLabel
+                                {
+                                    RectTransform = { OffsetMax = "0 0" },
+                                    Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
+                                }, ReportLayer + $".{targetId}.Recent");
+                            }
+                        }
+                        else
+                        {
+                            container.Add(new CuiPanel
+                            {
+                                RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}", OffsetMax = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}" },
+                                Image = { Color = "0.816 0.776 0.741 0.2" }
+                            }, ReportLayer + ".L");
                         }
                     }
-                    else
-                    {
-                        container.Add(new CuiPanel
-                        {
-                            RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}", OffsetMax = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}" },
-                            Image = { Color = HexToRustFormat("#D0C6BD33") }
-                        }, ReportLayer + ".L");
-                    }
                 }
-            }
 
-            CuiHelper.AddUi(player, container);
+                CuiHelper.AddUi(player, container);
+            }
+            finally
+            {
+                Pool.FreeUnmanaged(ref filtered);
+            }
         }
 
         private void DrawPlayerReportReasons(BasePlayer player, string targetId, string min, string max, bool leftAlign)
@@ -3319,7 +3348,7 @@ namespace Oxide.Plugins
 
             container.Add(new CuiButton()
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
+                RectTransform = { OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
                 Button = { Close = $"{ReportLayer}.T", Color = "0 0 0 1", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
             }, ReportLayer + $".T");
 
@@ -3327,12 +3356,12 @@ namespace Oxide.Plugins
             container.Add(new CuiButton()
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? -1 : 2)} 0", AnchorMax = $"{(leftAlign ? -2 : 3)} 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
-                Button = { Close = $"{ReportLayer}.T", Color = HexToRustFormat("#343434"), Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
+                Button = { Close = $"{ReportLayer}.T", Color = "0.204 0.204 0.204", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
             }, ReportLayer + $".T");
 
             container.Add(new CuiButton()
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"-1111111 -1111111", OffsetMax = $"1111111 1111111" },
+                RectTransform = { AnchorMax = "1 1", OffsetMin = $"-1111111 -1111111", OffsetMax = $"1111111 1111111" },
                 Button = { Close = $"{ReportLayer}.T", Color = "0 0 0 0.5", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
             }, ReportLayer + $".T");
 
@@ -3340,13 +3369,13 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? "0" : "1")} 0", AnchorMax = $"{(leftAlign ? "0" : "1")} 1", OffsetMin = $"{(leftAlign ? "-350" : "20")} 0", OffsetMax = $"{(leftAlign ? "-20" : "350")} -5" },
-                Text = { FadeIn = 0.4f, Text = lang.GetMessage("Subject.Head", this, player.UserIDString), Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#D0C6BD"), FontSize = 24, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
+                Text = { FadeIn = 0.4f, Text = lang.GetMessage("Subject.Head", this, player.UserIDString), Color = "0.816 0.776 0.741", FontSize = 24, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
             }, ReportLayer + ".T");
 
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? "0" : "1")} 0", AnchorMax = $"{(leftAlign ? "0" : "1")} 1", OffsetMin = $"{(leftAlign ? "-250" : "20")} 0", OffsetMax = $"{(leftAlign ? "-20" : "250")} -35" },
-                Text = { FadeIn = 0.4f, Text = $"{lang.GetMessage("Subject.SubHead", this, player.UserIDString).Replace("%PLAYER%", $"<b>{target.displayName}</b>")}", Font = "robotocondensed-regular.ttf", Color = HexToRustFormat("#D0C6BD80"), FontSize = 14, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
+                Text = { FadeIn = 0.4f, Text = $"{lang.GetMessage("Subject.SubHead", this, player.UserIDString).Replace("%PLAYER%", $"<b>{target.displayName}</b>")}", Font = "robotocondensed-regular.ttf", Color = "0.816 0.776 0.741 0.5", FontSize = 14, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
             }, ReportLayer + ".T");
 
             container.Add(new CuiElement
@@ -3355,24 +3384,24 @@ namespace Oxide.Plugins
                 Components = {
                     // Do not change in devblogs
                     new CuiRawImageComponent { SteamId = target.UserIDString, Sprite = "assets/icons/loading.png" },
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
+                    new CuiRectTransformComponent { OffsetMax = "0 0" }
                 }
             });
 
             try
             {
-                var was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+                bool was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
                 if (was_checked)
                 {
                     container.Add(new CuiPanel
                     {
-                        RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
+                        RectTransform = { AnchorMin = "0 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
                         Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
                     }, ReportLayer + $".T", ReportLayer + $".T.Recent");
 
                     container.Add(new CuiLabel
                     {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
+                        RectTransform = { OffsetMax = "0 0" },
                         Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
                     }, ReportLayer + $".T.Recent");
                 }
@@ -3384,12 +3413,12 @@ namespace Oxide.Plugins
 
             try
             {
-                for (var i = 0; i < _Settings.report_ui_reasons.Count; i++)
+                for (int i = 0; i < _Settings.report_ui_reasons.Count; i++)
                 {
-                    var offXMin = (20 + (i * 5)) + i * 80;
-                    var offXMax = 20 + (i * 5) + (i + 1) * 80;
+                    int offXMin = (20 + (i * 5)) + i * 80;
+                    int offXMax = 20 + (i * 5) + (i + 1) * 80;
 
-                    var sendReportCommand = UICommand((player, args, input) =>
+                    string sendReportCommand = UICommand((player, args, input) =>
                     {
                         SendReport(player, args.target_id, args.reason);
                     }, new { target_id = target.UserIDString, reason = _Settings.report_ui_reasons[i] }, "sendReportToPlayer");
@@ -3397,8 +3426,8 @@ namespace Oxide.Plugins
                     container.Add(new CuiButton()
                     {
                         RectTransform = { AnchorMin = $"{(leftAlign ? 0 : 1)} 0", AnchorMax = $"{(leftAlign ? 0 : 1)} 0", OffsetMin = $"{(leftAlign ? -offXMax : offXMin)} 15", OffsetMax = $"{(leftAlign ? -offXMin : offXMax)} 45" },
-                        Button = { FadeIn = 0.4f + i * 0.2f, Color = HexToRustFormat("#D0C6BD4D"), Command = sendReportCommand },
-                        Text = { FadeIn = 0.4f + i * 0.2f, Text = $"{_Settings.report_ui_reasons[i]}", Align = TextAnchor.MiddleCenter, Color = HexToRustFormat("#D0C6BD"), Font = "robotocondensed-bold.ttf", FontSize = 16 }
+                        Button = { FadeIn = 0.4f + i * 0.2f, Color = "0.816 0.776 0.741 0.3", Command = sendReportCommand },
+                        Text = { FadeIn = 0.4f + i * 0.2f, Text = $"{_Settings.report_ui_reasons[i]}", Align = TextAnchor.MiddleCenter, Color = "0.816 0.776 0.741",  FontSize = 16 }
                     }, ReportLayer + $".T");
                 }
             }
@@ -3409,10 +3438,7 @@ namespace Oxide.Plugins
 
             CuiHelper.AddUi(player, container);
         }
-
-
-        private const string CheckLayer = "RP_PrivateLayer";
-
+        
         private void DrawNoticeInterface(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, CheckLayer);
@@ -3420,8 +3446,8 @@ namespace Oxide.Plugins
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
-                Button = { Color = HexToRustFormat("#1C1C1C"), Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" },
+                RectTransform = { AnchorMin = "0 0.5", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
+                Button = { Color = "0.11 0.11 0.11", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" },
                 Text = { Text = "", Align = TextAnchor.MiddleCenter }
             }, "Under", CheckLayer);
 
@@ -3429,7 +3455,7 @@ namespace Oxide.Plugins
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                RectTransform = { OffsetMax = "0 0" },
                 Text = { Text = text, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 16 }
             }, CheckLayer);
 
@@ -4195,33 +4221,6 @@ namespace Oxide.Plugins
             blocks.Clear();
             seenBuildings.Clear();
             return false;
-        }
-
-        private static string HexToRustFormat(string hex)
-        {
-            if (string.IsNullOrEmpty(hex))
-            {
-                hex = "#FFFFFFFF";
-            }
-
-            var str = hex.Trim('#');
-
-            if (str.Length == 6)
-                str += "FF";
-
-            if (str.Length != 8)
-            {
-                throw new Exception(hex);
-            }
-
-            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
-            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
-            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
-            var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
-
-            UnityEngine.Color color = new Color32(r, g, b, a);
-
-            return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
         }
         
         private static readonly HashSet<char> _normalizeAllowed = new()
