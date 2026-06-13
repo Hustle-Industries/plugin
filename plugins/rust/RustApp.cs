@@ -4127,20 +4127,34 @@ namespace Oxide.Plugins
 
             return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
         }
-
-        private static List<char> Letters = new List<char> { '☼', 's', 't', 'r', 'e', 'т', 'ы', 'в', 'о', 'ч', 'х', 'а', 'р', 'u', 'c', 'h', 'a', 'n', 'z', 'o', '^', 'm', 'l', 'b', 'i', 'p', 'w', 'f', 'k', 'y', 'v', '$', '+', 'x', '1', '®', 'd', '#', 'г', 'ш', 'к', '.', 'я', 'у', 'с', 'ь', 'ц', 'и', 'б', 'е', 'л', 'й', '_', 'м', 'п', 'н', 'g', 'q', '3', '4', '2', ']', 'j', '[', '8', '{', '}', '_', '!', '@', '#', '$', '%', '&', '?', '-', '+', '=', '~', ' ', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п', 'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ь', 'ы', 'ъ', 'э', 'ю', 'я' };
+        
+        private static readonly HashSet<char> _normalizeAllowed = new()
+        {
+            '☼', '^', '$', '+', '®', '#', '.', '_', ']', '[', '{', '}', '!', '@', '%', '&', '?', '-', '=', '~', ' ',
+            '1', '2', '3', '4', '8',
+            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+            'а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п', 'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ь', 'ы', 'ъ', 'э', 'ю', 'я'
+        };
 
         private static string NormalizeString(string text)
         {
-            string name = "";
+            if (string.IsNullOrEmpty(text)) return string.Empty;
 
-            foreach (var @char in text)
+            StringBuilder? sb = Pool.Get<StringBuilder>();
+            try
             {
-                if (Letters.Contains(@char.ToString().ToLower().ToCharArray()[0]))
-                    name += @char;
+                for (int i = 0; i < text.Length; i++)
+                {
+                    char c = text[i];
+                    if (_normalizeAllowed.Contains(char.ToLowerInvariant(c)))
+                        sb.Append(c);
+                }
+                return sb.Length == 0 ? string.Empty : sb.ToString();
             }
-
-            return name;
+            finally
+            {
+                Pool.FreeUnmanaged(ref sb);
+            }
         }
 
         private static bool DetectIsRaidBlock(BasePlayer player)
