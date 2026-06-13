@@ -1543,10 +1543,9 @@ namespace Oxide.Plugins
 
         private class QueueWorker : RustAppWorker
         {
+            private readonly HashSet<string> QueueProcessedIds = new();
 
-            private List<string> QueueProcessedIds = new List<string>();
-
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1606,9 +1605,7 @@ namespace Oxide.Plugins
             private void ProcessQueueTasks(Dictionary<string, object> queueResponses)
             {
                 if (queueResponses.Keys.Count == 0)
-                {
                     return;
-                }
 
                 QueueApi.ProcessQueueTasks(new QueueApi.QueueTaskResponsePayload { data = queueResponses }).Execute(() =>
                 {
@@ -1617,7 +1614,6 @@ namespace Oxide.Plugins
                 },
                 (err) =>
                 {
-                    QueueProcessedIds.Clear();
                     Debug($"Failed to process queue: {err}");
                 });
             }
