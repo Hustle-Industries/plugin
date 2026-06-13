@@ -517,16 +517,38 @@ namespace Oxide.Plugins
 
             #region SendSignage
 
-            public class PluginSignageCreateDto
+            public class PluginSignageCreateDto : Pool.IPooled
             {
                 public string steam_id;
                 public ulong net_id;
-
                 public byte[] base64_image;
-
                 public string type;
                 public string position;
                 public string square;
+
+                public static PluginSignageCreateDto Create(string steamId, ulong netId, byte[] base64Image, string type, string position, string square)
+                {
+                    PluginSignageCreateDto? dto = Pool.Get<PluginSignageCreateDto>();
+                    dto.steam_id = steamId;
+                    dto.net_id = netId;
+                    dto.base64_image = base64Image;
+                    dto.type = type;
+                    dto.position = position;
+                    dto.square = square;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    net_id = 0;
+                    base64_image = null;
+                    type = null;
+                    position = null;
+                    square = null;
+                }
             }
 
             public static StableRequest<object> SendSignage(PluginSignageCreateDto payload)
@@ -538,9 +560,16 @@ namespace Oxide.Plugins
 
             #region SendSignageDestroyed
 
-            public class SignageDestroyedDto
+            public class SignageDestroyedDto : Pool.IPooled
             {
                 public List<string> net_ids;
+
+                public void LeavePool() => net_ids = Pool.Get<List<string>>();
+
+                public void EnterPool()
+                {
+                    if (net_ids != null) Pool.FreeUnmanaged(ref net_ids);
+                }
             }
 
             public static StableRequest<object> SendSignageDestroyed(SignageDestroyedDto payload)
@@ -1981,20 +2010,18 @@ namespace Oxide.Plugins
             {
                 try
                 {
-                    var obj = new CourtApi.PluginSignageCreateDto
-                    {
-                        steam_id = update.PlayerId,
-                        net_id = update.Entity.net.ID.Value,
+                    Vector3 pos = update.Entity.transform.position;
+                    CourtApi.PluginSignageCreateDto? obj = CourtApi.PluginSignageCreateDto.Create(
+                        update.PlayerId,
+                        update.Entity.net.ID.Value,
+                        update.GetImage(),
+                        update.Entity.ShortPrefabName,
+                        pos.ToString(),
+                        MapHelper.PositionToString(pos));
 
-                        base64_image = update.GetImage(),
+                    CourtApi.SendSignage(obj).Execute();
 
-                        type = update.Entity.ShortPrefabName,
-                        position = update.Entity.transform.position.ToString(),
-                        square = MapHelper.PositionToString(update.Entity.transform.position)
-                    };
-
-                    CourtApi.SendSignage(obj)
-                      .Execute();
+                    Pool.Free(ref obj);
                 }
                 catch
                 {
@@ -2009,19 +2036,26 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.SignageDestroyedDto { net_ids = Pool.Get<List<string>>() };
+                CourtApi.SignageDestroyedDto? payload = Pool.Get<CourtApi.SignageDestroyedDto>();
                 payload.net_ids.AddRange(DestroyedSignagesQueue);
                 DestroyedSignagesQueue.Clear();
 
                 CourtApi.SendSignageDestroyed(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.net_ids);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     DestroyedSignagesQueue.AddRange(payload.net_ids);
-                    Pool.FreeUnmanaged(ref payload.net_ids);
+                    payload.net_ids.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+                DestroyedSignagesQueue.Clear();
             }
         }
 
