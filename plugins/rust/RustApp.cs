@@ -151,7 +151,7 @@ namespace Oxide.Plugins
                         payload.steam_name = connection.username.Replace("<blank>", "blank");
                         payload.ip = IPAddressWithoutPort(connection.ipaddress);
                         payload.no_license = DetectNoLicense(connection);
-                        payload.team = new List<string>();
+                        payload.team = Pool.Get<List<string>>();
                     }
 
                     payload.ping = Network.Net.sv.GetAveragePing(connection);
@@ -214,6 +214,8 @@ namespace Oxide.Plugins
 
                 public PluginStatePlayerMetaDto meta = new PluginStatePlayerMetaDto();
                 public List<string> team;
+                
+                public void FreePooledFields() => Pool.FreeUnmanaged(ref team);
             }
 
             public class PluginStateUpdatePayload : PluginServerDto
@@ -2328,7 +2330,11 @@ namespace Oxide.Plugins
             var steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : userid.ToString();
             OnPlayerDisconnectedNormalized(steamId, reasonFinal);
 
-            CourtApi.players.Remove(userid);
+            if (CourtApi.players.TryGetValue(userid, out var dto))
+            {
+                dto.FreePooledFields();
+                CourtApi.players.Remove(userid);
+            }
             _tempDisconnectReasons.Remove(userid);
         }
 
@@ -3609,6 +3615,11 @@ namespace Oxide.Plugins
         private void RustAppEngineDestroy()
         {
             UnityEngine.Object.Destroy(_RustAppEngine?.gameObject);
+
+
+            if (CourtApi.players != null)
+                foreach (CourtApi.PluginStatePlayerDto? dto in CourtApi.players.Values)
+                    dto.FreePooledFields();
 
             // Clean-up stale static references
             _RustApp = null;
