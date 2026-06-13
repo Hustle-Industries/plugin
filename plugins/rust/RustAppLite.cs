@@ -12,7 +12,7 @@ using Oxide.Game.Rust.Libraries;
 
 namespace Oxide.Plugins
 {
-  [Info("RustApp Lite", "RustApp", "1.0.10")]
+  [Info("RustApp Lite", "RustApp", "1.0.11")]
   [Description("Get reports on players in Discord, using a nicely designed interface or F7")]
   public class RustAppLite : RustPlugin
   {
@@ -538,17 +538,17 @@ namespace Oxide.Plugins
     private void CmdConsoleReportPanel(ConsoleSystem.Arg args)
     {
       var player = args.Player();
-      if (player == null || !args.HasArgs(1))
+      if (player == null || !args.HasArgs())
       {
         return;
       }
 
-      switch (args.Args[0].ToLower())
+      switch (args.GetString(0).ToLower())
       {
         case "search":
           {
-            int page = args.HasArgs(2) ? int.Parse(args.Args[1]) : 0;
-            string search = args.HasArgs(3) ? args.Args[2] : "";
+            int page = args.GetInt(1);
+            string search = args.GetString(2);
 
             Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
             EffectNetwork.Send(effect, player.Connection);
@@ -558,7 +558,7 @@ namespace Oxide.Plugins
           }
         case "show":
           {
-            string targetId = args.Args[1];
+            string targetId = args.GetString(1);
             BasePlayer target = BasePlayer.Find(targetId) ?? BasePlayer.FindSleeping(targetId);
 
             Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
@@ -569,7 +569,7 @@ namespace Oxide.Plugins
 
             container.Add(new CuiPanel
             {
-              RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{args.Args[2]} {args.Args[3]}", OffsetMax = $"{args.Args[4]} {args.Args[5]}" },
+              RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{args.GetString(2)} {args.GetString(3)}", OffsetMax = $"{args.GetString(4)} {args.GetString(5)}" },
               Image = { Color = "0 0 0 1" }
             }, ReportLayer + $".L", ReportLayer + $".T");
 
@@ -581,7 +581,7 @@ namespace Oxide.Plugins
             }, ReportLayer + $".T");
 
 
-            bool leftAlign = bool.Parse(args.Args[6]);
+            bool leftAlign = args.GetBool(6);
             container.Add(new CuiButton()
             {
               RectTransform = { AnchorMin = $"{(leftAlign ? -1 : 2)} 0", AnchorMax = $"{(leftAlign ? -2 : 3)} 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
@@ -649,8 +649,8 @@ namespace Oxide.Plugins
               return;
             }
 
-            string targetId = args.Args[1];
-            string reason = args.Args[2].Replace("0", "");
+            string targetId = args.GetString(1);
+            string reason = args.GetString(2).Replace("0", "");
 
             BasePlayer target = BasePlayer.Find(targetId) ?? BasePlayer.FindSleeping(targetId);
 

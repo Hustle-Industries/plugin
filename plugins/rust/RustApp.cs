@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using ConVar;
+using Facepunch;
 using JetBrains.Annotations;
 using Network;
 using Newtonsoft.Json;
@@ -28,7 +29,7 @@ using Star = ProtoBuf.PatternFirework.Star;
 
 namespace Oxide.Plugins
 {
-    [Info("RustApp", "RustApp.io", "2.6.0")]
+    [Info("RustApp", "RustApp.io", "2.6.2")]
     public class RustApp : RustPlugin
     {
         #region Variables
@@ -147,11 +148,11 @@ namespace Oxide.Plugins
                     {
                         payload = new PluginStatePlayerDto();
                         players[userid] = payload;
-                        payload.steam_id = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : userid.ToString();
+                        payload.steam_id = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : RustApp.GetSteamIdString(userid);
                         payload.steam_name = connection.username.Replace("<blank>", "blank");
                         payload.ip = IPAddressWithoutPort(connection.ipaddress);
                         payload.no_license = DetectNoLicense(connection);
-                        payload.team = new List<string>();
+                        payload.team = Pool.Get<List<string>>();
                     }
 
                     payload.ping = Network.Net.sv.GetAveragePing(connection);
@@ -214,6 +215,8 @@ namespace Oxide.Plugins
 
                 public PluginStatePlayerMetaDto meta = new PluginStatePlayerMetaDto();
                 public List<string> team;
+                
+                public void FreePooledFields() => Pool.FreeUnmanaged(ref team);
             }
 
             public class PluginStateUpdatePayload : PluginServerDto
@@ -234,20 +237,43 @@ namespace Oxide.Plugins
 
             #region SendChatMessages
 
-            public class PluginChatMessageDto
+            public class PluginChatMessageDto : Pool.IPooled
             {
                 public string steam_id;
-                [CanBeNull]
                 public string target_steam_id;
-
                 public bool is_team;
-
                 public string text;
+
+                public static PluginChatMessageDto Create(string steamId, string text, bool isTeam, [CanBeNull] string targetSteamId = null)
+                {
+                    PluginChatMessageDto dto = Pool.Get<PluginChatMessageDto>();
+                    dto.steam_id = steamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.is_team = isTeam;
+                    dto.text = text;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    target_steam_id = null;
+                    is_team = false;
+                    text = null;
+                }
             }
 
-            public class PluginChatMessagePayload
+            public class PluginChatMessagePayload : Pool.IPooled
             {
-                public List<PluginChatMessageDto> messages;
+                public List<PluginChatMessageDto>? messages;
+
+                public void LeavePool() => messages = Pool.Get<List<PluginChatMessageDto>>();
+                public void EnterPool()
+                {
+                    if (messages != null) Pool.FreeUnmanaged(ref messages);
+                }
             }
 
             public static StableRequest<object> SendChatMessages(PluginChatMessagePayload payload)
@@ -259,23 +285,45 @@ namespace Oxide.Plugins
 
             #region SendReports
 
-            public class PluginReportDto
+            public class PluginReportDto : Pool.IPooled
             {
                 public string initiator_steam_id;
-                [CanBeNull]
                 public string target_steam_id;
-
                 public List<string> sub_targets_steam_ids;
-
                 public string reason;
-
-                [CanBeNull]
                 public string message;
+
+                public static PluginReportDto Create(string initiatorSteamId, string targetSteamId, string reason, string message = null)
+                {
+                    PluginReportDto? dto = Pool.Get<PluginReportDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.message = message;
+                    return dto;
+                }
+
+                public void LeavePool() => sub_targets_steam_ids = Pool.Get<List<string>>();
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    reason = null;
+                    message = null;
+                    Pool.FreeUnmanaged(ref sub_targets_steam_ids);
+                }
             }
 
-            public class PluginReportBatchPayload
+            public class PluginReportBatchPayload : Pool.IPooled
             {
-                public List<CourtApi.PluginReportDto> reports;
+                public List<PluginReportDto>? reports;
+
+                public void LeavePool() => reports = Pool.Get<List<PluginReportDto>>();
+                public void EnterPool()
+                {
+                    if (reports != null) Pool.FreeUnmanaged(ref reports);
+                }
             }
 
             public static StableRequest<object> SendReports(PluginReportBatchPayload payload)
@@ -305,17 +353,44 @@ namespace Oxide.Plugins
 
             #region Sleeping bag
 
-            public class PluginSleepingBagDto
+            public class PluginSleepingBagDto : Pool.IPooled
             {
                 public string initiator_steam_id;
                 public string target_steam_id;
                 public string position;
                 public bool are_friends;
+
+                public static PluginSleepingBagDto Create(string initiatorSteamId, string targetSteamId, string position, bool areFriends)
+                {
+                    PluginSleepingBagDto? dto = Pool.Get<PluginSleepingBagDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.position = position;
+                    dto.are_friends = areFriends;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    position = null;
+                    are_friends = false;
+                }
             }
 
-            public class PluginSleepingBagBatchDto
+            public class PluginSleepingBagBatchDto : Pool.IPooled
             {
-                public List<PluginSleepingBagDto> sleeping_bags = new List<PluginSleepingBagDto>();
+                public List<PluginSleepingBagDto> sleeping_bags;
+
+                public void LeavePool() => sleeping_bags = Pool.Get<List<PluginSleepingBagDto>>();
+
+                public void EnterPool()
+                {
+                    if (sleeping_bags != null) Pool.FreeUnmanaged(ref sleeping_bags);
+                }
             }
 
             public static StableRequest<object> SleepingBagCreate(PluginSleepingBagBatchDto payload)
@@ -327,14 +402,38 @@ namespace Oxide.Plugins
 
             #region BanCreate
 
-            public class PluginBanCreatePayload
+            public class PluginBanCreatePayload : Pool.IPooled
             {
                 public string target_steam_id;
                 public string reason;
                 public bool global;
                 public bool ban_ip;
-                public string duration;
-                public string comment;
+                public string? duration;
+                public string? comment;
+
+                public static PluginBanCreatePayload Create(string targetSteamId, string reason, string? duration, bool global, bool banIp, string comment)
+                {
+                    PluginBanCreatePayload? dto = Pool.Get<PluginBanCreatePayload>();
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.duration = duration;
+                    dto.global = global;
+                    dto.ban_ip = banIp;
+                    dto.comment = comment;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    target_steam_id = null;
+                    reason = null;
+                    duration = null;
+                    global = false;
+                    ban_ip = false;
+                    comment = null;
+                }
             }
 
             public static StableRequest<object> BanCreate(PluginBanCreatePayload payload)
@@ -418,16 +517,38 @@ namespace Oxide.Plugins
 
             #region SendSignage
 
-            public class PluginSignageCreateDto
+            public class PluginSignageCreateDto : Pool.IPooled
             {
                 public string steam_id;
                 public ulong net_id;
-
                 public byte[] base64_image;
-
                 public string type;
                 public string position;
                 public string square;
+
+                public static PluginSignageCreateDto Create(string steamId, ulong netId, byte[] base64Image, string type, string position, string square)
+                {
+                    PluginSignageCreateDto? dto = Pool.Get<PluginSignageCreateDto>();
+                    dto.steam_id = steamId;
+                    dto.net_id = netId;
+                    dto.base64_image = base64Image;
+                    dto.type = type;
+                    dto.position = position;
+                    dto.square = square;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    net_id = 0;
+                    base64_image = null;
+                    type = null;
+                    position = null;
+                    square = null;
+                }
             }
 
             public static StableRequest<object> SendSignage(PluginSignageCreateDto payload)
@@ -439,9 +560,16 @@ namespace Oxide.Plugins
 
             #region SendSignageDestroyed
 
-            public class SignageDestroyedDto
+            public class SignageDestroyedDto : Pool.IPooled
             {
                 public List<string> net_ids;
+
+                public void LeavePool() => net_ids = Pool.Get<List<string>>();
+
+                public void EnterPool()
+                {
+                    if (net_ids != null) Pool.FreeUnmanaged(ref net_ids);
+                }
             }
 
             public static StableRequest<object> SendSignageDestroyed(SignageDestroyedDto payload)
@@ -632,16 +760,38 @@ namespace Oxide.Plugins
 
             #region PlayerMuteCreate
 
-            public class PlayerMuteCreateDto
+            public class PlayerMuteCreateDto : Pool.IPooled
             {
                 public string target_steam_id;
                 public string reason;
                 public string duration;
-
                 public bool broadcast;
+                public string? comment;
+                public string? references_message;
 
-                [CanBeNull] public string comment;
-                [CanBeNull] public string references_message;
+                public static PlayerMuteCreateDto Create(string targetSteamId, string reason, string duration, bool broadcast = false, string? comment = null, string? referencesMessage = null)
+                {
+                    PlayerMuteCreateDto? dto = Pool.Get<PlayerMuteCreateDto>();
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.duration = duration;
+                    dto.broadcast = broadcast;
+                    dto.comment = comment;
+                    dto.references_message = referencesMessage;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    target_steam_id = null;
+                    reason = null;
+                    duration = null;
+                    broadcast = false;
+                    comment = null;
+                    references_message = null;
+                }
             }
 
             public static StableRequest<object> PlayerMuteCreate(PlayerMuteCreateDto data)
@@ -653,9 +803,19 @@ namespace Oxide.Plugins
 
             #region PlayerMuteDelete
 
-            public class PlayerMuteDeleteDto
+            public class PlayerMuteDeleteDto : Pool.IPooled
             {
                 public string target_steam_id;
+
+                public static PlayerMuteDeleteDto Create(string targetSteamId)
+                {
+                    PlayerMuteDeleteDto? dto = Pool.Get<PlayerMuteDeleteDto>();
+                    dto.target_steam_id = targetSteamId;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool() => target_steam_id = null;
             }
 
             public static StableRequest<object> PlayerMuteDelete(PlayerMuteDeleteDto data)
@@ -717,15 +877,37 @@ namespace Oxide.Plugins
 
             #region BanGetBatch
 
-            public class BanGetBatchEntryPayloadDto
+            public class BanGetBatchEntryPayloadDto : Pool.IPooled
             {
                 public string steam_id;
                 public string ip;
+
+                public static BanGetBatchEntryPayloadDto Create(string steamId, string ip)
+                {
+                    BanGetBatchEntryPayloadDto? dto = Pool.Get<BanGetBatchEntryPayloadDto>();
+                    dto.steam_id = steamId;
+                    dto.ip = ip;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    ip = null;
+                }
             }
 
-            public class BanGetBatchPayload
+            public class BanGetBatchPayload : Pool.IPooled
             {
                 public List<BanGetBatchEntryPayloadDto> players;
+
+                public void LeavePool() => players = Pool.Get<List<BanGetBatchEntryPayloadDto>>();
+
+                public void EnterPool()
+                {
+                    if (players != null) Pool.FreeUnmanaged(ref players);
+                }
             }
 
             public class BanGetBatchEntryResponseDto
@@ -809,8 +991,27 @@ namespace Oxide.Plugins
 
             public static void write(CheckInfo courtMeta)
             {
-                // Clear checks > 30 days ago
-                courtMeta.LastChecks = courtMeta.LastChecks.Where(v => _RustApp.CurrentTime() - v.Value < 30 * 24 * 60 * 60).ToDictionary(v => v.Key, v => v.Value);
+                const double ThirtyDaysSeconds = 30 * 24 * 60 * 60;
+                double now = _RustApp.CurrentTime();
+
+                List<string>? toRemove = Pool.Get<List<string>>();
+                try
+                {
+                    foreach (KeyValuePair<string, double> kv in courtMeta.LastChecks)
+                    {
+                        if (now - kv.Value >= ThirtyDaysSeconds)
+                            toRemove.Add(kv.Key);
+                    }
+                    
+                    for (int i = 0; i < toRemove.Count; i++)
+                    {
+                        courtMeta.LastChecks.Remove(toRemove[i]);
+                    }
+                }
+                finally
+                {
+                    Pool.FreeUnmanaged(ref toRemove);
+                }
 
                 Interface.Oxide.DataFileSystem.WriteObject("RustApp_CheckMeta", courtMeta);
             }
@@ -976,6 +1177,9 @@ namespace Oxide.Plugins
 
             public Action? OnAuthSuccess;
             public Action? OnAuthFailed;
+            
+            private Action? _cachedAuthSuccess;
+            private Action<string>? _cachedAuthError;
 
             public void CycleAuthUpdate()
             {
@@ -984,99 +1188,99 @@ namespace Oxide.Plugins
 
             public void CheckAuthStatus()
             {
-                Action onError = () =>
+                _cachedAuthSuccess ??= HandleAuthSuccess;
+                _cachedAuthError ??= HandleAuthError;
+
+                CourtApi.GetServerInfo().Execute(_cachedAuthSuccess, _cachedAuthError);
+            }
+
+            private void HandleAuthSuccess()
+            {
+                if (IsAuthed == true)
                 {
-                    if (IsAuthed == false)
-                    {
-                        return;
-                    }
-
-                    IsAuthed = false;
-                    OnAuthFailed?.Invoke();
-                };
-
-                Action onSuccess = () =>
-                {
-                    if (IsAuthed == true)
-                    {
-                        return;
-                    }
-
-                    Log("Connection to the service established");
-
-                    IsAuthed = true;
-                    OnAuthSuccess?.Invoke();
-
-                    if (_TempWipeMarker)
-                    {
-                        _TempWipeMarker = false;
-                        CourtApi.SendWipe().Execute();
-                    }
-                };
-
-                CourtApi.GetServerInfo().Execute(() =>
-                {
-                    onSuccess();
                     return;
-                },
-                (err) =>
+                }
+
+                Log("Connection to the service established");
+
+                IsAuthed = true;
+                OnAuthSuccess?.Invoke();
+
+                if (_TempWipeMarker)
                 {
-                    // secret = ""
-                    var codeError1 = Api.ErrorContains(err, "some of required headers are wrong or missing");
-                    // secret = "123"
-                    var codeError2 = Api.ErrorContains(err, "authorization secret is corrupted");
-                    // server.ip != this.ip || server.port != this.port
-                    var codeError3 = Api.ErrorContains(err, "Check server configuration, required");
+                    _TempWipeMarker = false;
+                    CourtApi.SendWipe().Execute();
+                }
+            }
 
-                    if (codeError1 || codeError2 || codeError3)
+            private void HandleAuthFailure()
+            {
+                if (IsAuthed == false)
+                {
+                    return;
+                }
+
+                IsAuthed = false;
+                OnAuthFailed?.Invoke();
+            }
+
+            private void HandleAuthError(string err)
+            {
+                // secret = ""
+                var codeError1 = Api.ErrorContains(err, "some of required headers are wrong or missing");
+                // secret = "123"
+                var codeError2 = Api.ErrorContains(err, "authorization secret is corrupted");
+                // server.ip != this.ip || server.port != this.port
+                var codeError3 = Api.ErrorContains(err, "Check server configuration, required");
+
+                if (codeError1 || codeError2 || codeError3)
+                {
+                    if (IsAuthed != false)
                     {
-                        if (IsAuthed != false)
-                        {
-                            Error("Your server is not paired with our network, follow instructions to pair server:");
-                            Error("1. If you already start pairing, enter 'ra.pair %code%' which you get from our site");
-                            Error("2. Open servers page, press 'connect server', and enter command which you get on it");
-                        }
-
-                        onError();
-                        return;
+                        Error("Your server is not paired with our network, follow instructions to pair server:");
+                        Error("1. If you already start pairing, enter 'ra.pair %code%' which you get from our site");
+                        Error("2. Open servers page, press 'connect server', and enter command which you get on it");
                     }
 
-                    // version < minVersion
-                    var versionError1 = Api.ErrorContains(err, " is lower than minimal: ");
-                    // if we block some version
-                    var versionError2 = Api.ErrorContains(err, "This version contains serious bug, please update plugin");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    if (versionError1 || versionError2)
-                    {
-                        Error("Your plugin is outdated, you should download new version!");
-                        Error("1. Open servers page, press 'update' near server to download new version, then just replace plugin");
-                        Error("2. If you don't have 'update' button, press settings icon and choose 'download plugin' button");
+                // version < minVersion
+                var versionError1 = Api.ErrorContains(err, " is lower than minimal: ");
+                // if we block some version
+                var versionError2 = Api.ErrorContains(err, "This version contains serious bug, please update plugin");
 
-                        onError();
-                        return;
-                    }
+                if (versionError1 || versionError2)
+                {
+                    Error("Your plugin is outdated, you should download new version!");
+                    Error("1. Open servers page, press 'update' near server to download new version, then just replace plugin");
+                    Error("2. If you don't have 'update' button, press settings icon and choose 'download plugin' button");
 
-                    // if tariff finished/balance zero
-                    var paymentError1 = Api.ErrorContains(err, "У вас кончились средства на балансе проекта, пополните на");
-                    // If some limits broken
-                    var paymentError2 = Api.ErrorContains(err, "Вы превысили лимиты по");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    if (paymentError1)
-                    {
-                        Error("Your balance is not enough to continue working with our service, top-up it");
-                        onError();
-                        return;
-                    }
+                // if tariff finished/balance zero
+                var paymentError1 = Api.ErrorContains(err, "У вас кончились средства на балансе проекта, пополните на");
+                // If some limits broken
+                var paymentError2 = Api.ErrorContains(err, "Вы превысили лимиты по");
 
-                    if (paymentError2)
-                    {
-                        Error("You have reached your limits, please upgrade your plan");
-                        onError();
-                        return;
-                    }
+                if (paymentError1)
+                {
+                    Error("Your balance is not enough to continue working with our service, top-up it");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    Debug($"Unknown exception in auth: {err}");
-                });
+                if (paymentError2)
+                {
+                    Error("You have reached your limits, please upgrade your plan");
+                    HandleAuthFailure();
+                    return;
+                }
+
+                Debug($"Unknown exception in auth: {err}");
             }
         }
 
@@ -1247,7 +1451,7 @@ namespace Oxide.Plugins
 
                 foreach (var connection in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { disconnect.Add(connection.userid.ToString(), "plugin-unload"); } catch { }
+                    try { disconnect.Add(GetSteamIdString(connection.userid), "plugin-unload"); } catch { }
                 }
 
                 foreach (var connection in ServerMgr.Instance.connectionQueue.queue)
@@ -1257,7 +1461,7 @@ namespace Oxide.Plugins
                         continue;
                     }
 
-                    try { disconnect.Add(connection.userid.ToString(), "plugin-unload"); } catch { }
+                    try { disconnect.Add(GetSteamIdString(connection.userid), "plugin-unload"); } catch { }
                 }
             }
 
@@ -1339,10 +1543,9 @@ namespace Oxide.Plugins
 
         private class QueueWorker : RustAppWorker
         {
+            private readonly HashSet<string> QueueProcessedIds = new();
 
-            private List<string> QueueProcessedIds = new List<string>();
-
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1402,9 +1605,7 @@ namespace Oxide.Plugins
             private void ProcessQueueTasks(Dictionary<string, object> queueResponses)
             {
                 if (queueResponses.Keys.Count == 0)
-                {
                     return;
-                }
 
                 QueueApi.ProcessQueueTasks(new QueueApi.QueueTaskResponsePayload { data = queueResponses }).Execute(() =>
                 {
@@ -1413,29 +1614,37 @@ namespace Oxide.Plugins
                 },
                 (err) =>
                 {
-                    QueueProcessedIds.Clear();
                     Debug($"Failed to process queue: {err}");
                 });
             }
 
+
+            private static readonly Dictionary<(string name, bool internalCall), string> _queueNameCache = new();
+
             private string ConvertToRustAppQueueFormat(string input, bool isInternalCall)
             {
-                var words = input.Replace("court/", "").Split('-');
+                (string input, bool isInternalCall) key = (input, isInternalCall);
+                if (_queueNameCache.TryGetValue(key, out string? cached))
+                    return cached;
+
+                string[]? words = input.Replace("court/", "").Split('-');
 
                 for (int i = 0; i < words.Length; i++)
                 {
                     words[i] = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(words[i]);
                 }
 
-                return $"RustApp_{(isInternalCall ? "Internal" : "")}Queue_" + string.Join("", words);
+                string result = $"RustApp_{(isInternalCall ? "Internal" : "")}Queue_" + string.Join("", words);
+                _queueNameCache[key] = result;
+                return result;
             }
         }
 
         private class BanWorker : RustAppWorker
         {
-            private List<BanApi.BanGetBatchEntryPayloadDto> BanUpdateQueue = new List<BanApi.BanGetBatchEntryPayloadDto>();
+            private readonly Dictionary<string, BanApi.BanGetBatchEntryPayloadDto> BanUpdateQueue = new();
 
-            public void Awake()
+            public new void Awake()
             {
                 base.Awake();
 
@@ -1446,19 +1655,19 @@ namespace Oxide.Plugins
 
             private void DefaultScanAllPlayers()
             {
-                foreach (var player in BasePlayer.activePlayerList)
+                foreach (BasePlayer? player in BasePlayer.activePlayerList)
                 {
                     try { CheckBans(player); } catch { }
                 }
 
-                foreach (var queued in ServerMgr.Instance.connectionQueue.queue)
+                foreach (Connection? queued in ServerMgr.Instance.connectionQueue.queue)
                 {
-                    try { CheckBans(queued.userid.ToString(), IPAddressWithoutPort(queued.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(queued.userid), IPAddressWithoutPort(queued.ipaddress)); } catch { }
                 }
 
-                foreach (var loading in ServerMgr.Instance.connectionQueue.joining)
+                foreach (Connection? loading in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { CheckBans(loading.userid.ToString(), IPAddressWithoutPort(loading.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(loading.userid), IPAddressWithoutPort(loading.ipaddress)); } catch { }
                 }
             }
 
@@ -1469,21 +1678,17 @@ namespace Oxide.Plugins
 
             public void CheckBans(string steamId, string ip)
             {
-                // Provide an option to bypass ban checks enforced by external plugins
-                var over = Interface.Oxide.CallHook("RustApp_CanIgnoreBan", steamId);
+                object? over = Interface.Oxide.CallHook("RustApp_CanIgnoreBan", steamId);
                 if (over != null)
+                    return;
+
+                if (BanUpdateQueue.TryGetValue(steamId, out BanApi.BanGetBatchEntryPayloadDto? existing))
                 {
+                    existing.ip = ip;
                     return;
                 }
 
-                var exists = BanUpdateQueue.Find(v => v.steam_id == steamId);
-                if (exists != null)
-                {
-                    exists.ip = ip;
-                    return;
-                }
-
-                BanUpdateQueue.Add(new BanApi.BanGetBatchEntryPayloadDto { steam_id = steamId, ip = ip });
+                BanUpdateQueue[steamId] = BanApi.BanGetBatchEntryPayloadDto.Create(steamId, ip);
             }
 
             private void CycleBanUpdate()
@@ -1495,32 +1700,18 @@ namespace Oxide.Plugins
 
                 CycleBanUpdateWrapper((steamId, ban) =>
                 {
-                    var queuePosition = BanUpdateQueue.Find(v => v.steam_id == steamId);
-                    if (queuePosition != null)
-                    {
-                        BanUpdateQueue.Remove(queuePosition);
-                    }
+                    BanUpdateQueue.Remove(steamId);
 
                     if (ban == null)
-                    {
                         return;
-                    }
 
                     if (ban.sync_project_id != 0 && !ban.sync_should_kick)
-                    {
                         return;
-                    }
 
                     if (ban.steam_id == steamId)
-                    {
-                        // Ban is directly to this steamId
                         ReactOnDirectBan(steamId, ban);
-                    }
                     else
-                    {
-                        // Ban was found by IP
                         ReactOnIpBan(steamId, ban);
-                    }
                 });
             }
 
@@ -1531,26 +1722,75 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new BanApi.BanGetBatchPayload { players = Pool.Get<List<BanApi.BanGetBatchEntryPayloadDto>>() };
-                payload.players.AddRange(BanUpdateQueue);
+                BanApi.BanGetBatchPayload? payload = Pool.Get<BanApi.BanGetBatchPayload>();
+                
+                foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
+                    payload.players.Add(entry);
+                
                 BanUpdateQueue.Clear();
 
                 BanApi.BanGetBatch(payload).Execute((data) =>
                 {
-                    payload.players.ForEach(originalPlayer =>
+                    Dictionary<string, BanApi.BanGetBatchEntryResponseDto>? entriesByPid = Pool.Get<Dictionary<string, BanApi.BanGetBatchEntryResponseDto>>();
+                    try
                     {
-                        var exists = data?.entries?.Find(banPlayer => banPlayer.steam_id == originalPlayer.steam_id);
-                        var ban = exists?.bans?.FirstOrDefault(v => v.computed_is_active);
-                        callback.Invoke(originalPlayer.steam_id, ban);
-                    });
-                    Pool.FreeUnmanaged(ref payload.players);
+                        if (data?.entries != null)
+                        {
+                            for (int i = 0; i < data.entries.Count; i++)
+                            {
+                                var e = data.entries[i];
+                                if (e?.steam_id != null) entriesByPid[e.steam_id] = e;
+                            }
+                        }
+
+                        for (int i = 0; i < payload.players.Count; i++)
+                        {
+                            BanApi.BanGetBatchEntryPayloadDto? originalPlayer = payload.players[i];
+                            BanApi.BanDto active = null;
+                            if (entriesByPid.TryGetValue(originalPlayer.steam_id, out BanApi.BanGetBatchEntryResponseDto? entry) && entry.bans != null)
+                            {
+                                for (int j = 0; j < entry.bans.Count; j++)
+                                {
+                                    if (entry.bans[j].computed_is_active)
+                                    {
+                                        active = entry.bans[j];
+                                        break;
+                                    }
+                                }
+                            }
+                            callback.Invoke(originalPlayer.steam_id, active);
+                        }
+                    }
+                    finally
+                    {
+                        Pool.FreeUnmanaged(ref entriesByPid);
+                        Pool.Free(ref payload.players, freeElements: true);
+                        Pool.Free(ref payload);
+                    }
                 },
                 (_) =>
                 {
                     Error($"Failed to process ban checks ({payload.players.Count}), retrying...");
-                    BanUpdateQueue.AddRange(payload.players);
-                    Pool.FreeUnmanaged(ref payload.players);
+                    for (int i = 0; i < payload.players.Count; i++)
+                    {
+                        BanApi.BanGetBatchEntryPayloadDto? p = payload.players[i];
+                        BanUpdateQueue[p.steam_id] = p;
+                    }
+                    payload.players.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
+                {
+                    BanApi.BanGetBatchEntryPayloadDto? e = entry;
+                    Pool.Free(ref e);
+                }
+                BanUpdateQueue.Clear();
             }
 
             public void ReactOnDirectBan(string steamId, BanApi.BanDto ban)
@@ -1602,9 +1842,9 @@ namespace Oxide.Plugins
 
         private class ChatWorker : RustAppWorker
         {
-            private List<CourtApi.PluginChatMessageDto> QueueMessages = new List<CourtApi.PluginChatMessageDto>();
+            private readonly List<CourtApi.PluginChatMessageDto> QueueMessages = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1623,28 +1863,42 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginChatMessagePayload { messages = Pool.Get<List<CourtApi.PluginChatMessageDto>>() };
+                CourtApi.PluginChatMessagePayload payload = Pool.Get<CourtApi.PluginChatMessagePayload>();
                 payload.messages.AddRange(QueueMessages);
                 QueueMessages.Clear();
 
                 CourtApi.SendChatMessages(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.messages);
+                    Pool.Free(ref payload.messages, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     QueueMessages.AddRange(payload.messages);
-                    Pool.FreeUnmanaged(ref payload.messages);
+                    payload.messages.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < QueueMessages.Count; i++)
+                {
+                    CourtApi.PluginChatMessageDto? item = QueueMessages[i];
+                    Pool.Free(ref item);
+                }
+                QueueMessages.Clear();
             }
         }
 
         private class ReportWorker : RustAppWorker
         {
-            public Dictionary<ulong, double> ReportCooldowns = new Dictionary<ulong, double>();
-            private List<CourtApi.PluginReportDto> QueueReportSend = new List<CourtApi.PluginReportDto>();
+            public readonly Dictionary<ulong, double> ReportCooldowns = new();
+            private readonly List<CourtApi.PluginReportDto> QueueReportSend = new();
 
-            public void Awake()
+            public new void Awake()
             {
                 base.Awake();
 
@@ -1663,19 +1917,33 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginReportBatchPayload { reports = Pool.Get<List<CourtApi.PluginReportDto>>() };
+                CourtApi.PluginReportBatchPayload? payload = Pool.Get<CourtApi.PluginReportBatchPayload>();
                 payload.reports.AddRange(QueueReportSend);
                 QueueReportSend.Clear();
 
                 CourtApi.SendReports(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.reports);
+                    Pool.Free(ref payload.reports, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     QueueReportSend.AddRange(payload.reports);
-                    Pool.FreeUnmanaged(ref payload.reports);
+                    payload.reports.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < QueueReportSend.Count; i++)
+                {
+                    CourtApi.PluginReportDto item = QueueReportSend[i];
+                    Pool.Free(ref item);
+                }
+                QueueReportSend.Clear();
             }
         }
 
@@ -1738,20 +2006,18 @@ namespace Oxide.Plugins
             {
                 try
                 {
-                    var obj = new CourtApi.PluginSignageCreateDto
-                    {
-                        steam_id = update.PlayerId,
-                        net_id = update.Entity.net.ID.Value,
+                    Vector3 pos = update.Entity.transform.position;
+                    CourtApi.PluginSignageCreateDto? obj = CourtApi.PluginSignageCreateDto.Create(
+                        update.PlayerId,
+                        update.Entity.net.ID.Value,
+                        update.GetImage(),
+                        update.Entity.ShortPrefabName,
+                        pos.ToString(),
+                        MapHelper.PositionToString(pos));
 
-                        base64_image = update.GetImage(),
+                    CourtApi.SendSignage(obj).Execute();
 
-                        type = update.Entity.ShortPrefabName,
-                        position = update.Entity.transform.position.ToString(),
-                        square = MapHelper.PositionToString(update.Entity.transform.position)
-                    };
-
-                    CourtApi.SendSignage(obj)
-                      .Execute();
+                    Pool.Free(ref obj);
                 }
                 catch
                 {
@@ -1766,27 +2032,34 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.SignageDestroyedDto { net_ids = Pool.Get<List<string>>() };
+                CourtApi.SignageDestroyedDto? payload = Pool.Get<CourtApi.SignageDestroyedDto>();
                 payload.net_ids.AddRange(DestroyedSignagesQueue);
                 DestroyedSignagesQueue.Clear();
 
                 CourtApi.SendSignageDestroyed(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.net_ids);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     DestroyedSignagesQueue.AddRange(payload.net_ids);
-                    Pool.FreeUnmanaged(ref payload.net_ids);
+                    payload.net_ids.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+                DestroyedSignagesQueue.Clear();
             }
         }
 
         private class SleepingBagWorker : RustAppWorker
         {
-            public List<CourtApi.PluginSleepingBagDto> SleepingBags = new List<CourtApi.PluginSleepingBagDto>();
+            public List<CourtApi.PluginSleepingBagDto> SleepingBags = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1805,23 +2078,33 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginSleepingBagBatchDto
-                {
-                    sleeping_bags = Pool.Get<List<CourtApi.PluginSleepingBagDto>>()
-                };
-
+                CourtApi.PluginSleepingBagBatchDto? payload = Pool.Get<CourtApi.PluginSleepingBagBatchDto>();
                 payload.sleeping_bags.AddRange(SleepingBags);
                 SleepingBags.Clear();
 
                 CourtApi.SleepingBagCreate(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.sleeping_bags);
+                    Pool.Free(ref payload.sleeping_bags, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     SleepingBags.AddRange(payload.sleeping_bags);
-                    Pool.FreeUnmanaged(ref payload.sleeping_bags);
+                    payload.sleeping_bags.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < SleepingBags.Count; i++)
+                {
+                    CourtApi.PluginSleepingBagDto? item = SleepingBags[i];
+                    Pool.Free(ref item);
+                }
+                SleepingBags.Clear();
             }
         }
 
@@ -1970,7 +2253,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var code = args.Args[0];
+            string? code = args.GetString(0);
 
             _RustAppEngine?.gameObject.AddComponent<PairWorker>().StartPairing(code);
         }
@@ -1978,42 +2261,43 @@ namespace Oxide.Plugins
         [ConsoleCommand("ra.mute")]
         private void CmdConsoleMute(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            var caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            var clearArgs = (args.Args ?? Array.Empty<string>()).Where(v => v != "--broadcast").ToList();
-            if (clearArgs.Count() < 3)
+            bool broadcast = args.HasArg("--broadcast", true);
+
+            if (!args.HasArgs(3))
             {
                 Error("Incorrect command format!\nCorrect format: ra.mute <steam-id> <reason> <time>\n\nAdditional options are available:\n'--broadcast' - broadcast mute");
                 return;
             }
 
-            var steamId = clearArgs[0];
-            var reason = clearArgs[1];
-            var duration = clearArgs[2];
+            string steamId = args.GetString(0);
+            string reason = args.GetString(1);
+            string duration = args.GetString(2);
 
-            var broadcast_bool = args.FullString.Contains("--broadcast");
-
-            RustApp_PlayerMuteCreate(steamId, reason, duration, null, null, broadcast_bool);
+            RustApp_PlayerMuteCreate(steamId, reason, duration, null, null, broadcast);
         }
 
         [ConsoleCommand("ra.unmute")]
         private void CmdConsoleUnmute(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            BasePlayer? caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            if (args.Args.Count() < 1)
+            if (!args.HasArgs(1))
             {
                 Error("Incorrect command format!\nCorrect format: ra.unmute <steam-id>");
                 return;
             }
 
-            var steamId = args.Args[0];
+            string? steamId = args.GetString(0);
 
             RustApp_PlayerMuteDelete(steamId);
         }
@@ -2021,56 +2305,47 @@ namespace Oxide.Plugins
         [ConsoleCommand("ra.ban")]
         private void CmdConsoleBan(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            BasePlayer? caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            var clearArgs = (args.Args ?? Array.Empty<string>()).Where(v => v != "--ban-ip" && v != "--global").ToList();
+            bool banIp = args.HasArg("--ban-ip", true);
+            bool global = args.HasArg("--global", true);
 
-            if (clearArgs.Count() < 2)
+            if (!args.HasArgs(2))
             {
                 Error("Incorrect command format!\nCorrect format: ra.ban <steam-id> <reason> <time (optional)>\n\nAdditional options are available:\n'--ban-ip' - bans IP\n'--global' - bans globally\n\nExample of banning with IP, globally: ra.ban 7656119812110397 \"cheat\" 7d --ban-ip --global");
                 return;
             }
 
-            var steam_id = clearArgs[0];
-            var reason = clearArgs[1];
-            var duration = clearArgs.Count() == 3 ? clearArgs[2] : "";
+            string steamId = args.GetString(0);
+            string reason = args.GetString(1);
+            string duration = args.GetString(2);
 
-            var global_bool = args.FullString.Contains("--global");
-            var ip_bool = args.FullString.Contains("--ban-ip");
-
-            BanCreate(steam_id, new CourtApi.PluginBanCreatePayload
-            {
-                target_steam_id = steam_id,
-                reason = reason,
-                global = global_bool,
-                ban_ip = ip_bool,
-                duration = duration.Length > 0 ? duration : null,
-                comment = "Ban via console"
-            });
+            BanCreate(steamId, CourtApi.PluginBanCreatePayload.Create(
+                steamId, reason, duration.Length > 0 ? duration : null, global, banIp, "Ban via console"));
         }
 
         [ConsoleCommand("ra.unban")]
         private void CmdConsoleBanDelete(ConsoleSystem.Arg args)
         {
-            if (args.Player() != null && !args.Player().IsAdmin)
+            BasePlayer? caller = args.Player();
+            if (caller != null && !caller.IsAdmin)
             {
                 return;
             }
 
-            var clearArgs = (args.Args ?? Array.Empty<string>()).ToList();
-
-            if (clearArgs.Count() != 1)
+            if (!args.HasArgs(1))
             {
                 Error("Incorrect command format!\nCorrect format: ra.unban <steam-id>");
                 return;
             }
 
-            var steam_id = clearArgs[0];
+            string steamId = args.GetString(0);
 
-            BanDelete(steam_id);
+            BanDelete(steamId);
         }
 
         #endregion
@@ -2141,6 +2416,8 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            _tempDisconnectReasons.Clear();
+
             RustAppEngineDestroy();
             DestroyAllUi();
         }
@@ -2267,11 +2544,16 @@ namespace Oxide.Plugins
 
         private void CanUserLogin(string name, string id, string ipAddress)
         {
+            if (ulong.TryParse(id, out ulong userid))
+                _tempDisconnectReasons.Remove(userid);
+
             OnPlayerConnectedNormalized(id, IPAddressWithoutPort(ipAddress));
         }
 
         private void OnPlayerConnected(BasePlayer player)
         {
+            _tempDisconnectReasons.Remove(player.userID);
+
             OnPlayerConnectedNormalized(player.UserIDString, IPAddressWithoutPort(player.Connection.ipaddress));
         }
 
@@ -2307,10 +2589,14 @@ namespace Oxide.Plugins
                 reasonFinal = $"{reason}: {tempReason}";
             }
 
-            var steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : userid.ToString();
+            var steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : GetSteamIdString(userid);
             OnPlayerDisconnectedNormalized(steamId, reasonFinal);
 
-            CourtApi.players.Remove(userid);
+            if (CourtApi.players.TryGetValue(userid, out var dto))
+            {
+                dto.FreePooledFields();
+                CourtApi.players.Remove(userid);
+            }
             _tempDisconnectReasons.Remove(userid);
         }
 
@@ -2320,12 +2606,17 @@ namespace Oxide.Plugins
 
         private void OnTeamKick(RelationshipManager.PlayerTeam team, BasePlayer player, ulong target)
         {
-            SetTeamChange(player.UserIDString, target.ToString());
+            SetTeamChange(player.UserIDString, GetSteamIdString(target));
         }
 
         private void OnTeamDisband(RelationshipManager.PlayerTeam team)
         {
-            team.members.ForEach(v => SetTeamChange(v.ToString(), v.ToString()));
+            List<ulong>? members = team.members;
+            for (int i = 0; i < members.Count; i++)
+            {
+                string id = GetSteamIdString(members[i]);
+                SetTeamChange(id, id);
+            }
         }
 
         private void OnTeamLeave(RelationshipManager.PlayerTeam team, BasePlayer player)
@@ -2352,7 +2643,7 @@ namespace Oxide.Plugins
             var mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(connection.userid);
             if (mute != null && mute.LeftSeconds() > 0)
             {
-                var msg = _RustApp.lang.GetMessage("System.Mute.Message.Self", _RustApp, connection.userid.ToString())
+                var msg = _RustApp.lang.GetMessage("System.Mute.Message.Self", _RustApp, GetSteamIdString(connection.userid))
                     .Replace("%REASON%", mute.reason)
                     .Replace("%TIME%", mute.GetLeftTime());
 
@@ -2399,19 +2690,15 @@ namespace Oxide.Plugins
             }
         }
 
-        private void OnPlayerChat(BasePlayer player, string message, ConVar.Chat.ChatChannel channel)
+        private void OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
         {
-            if (channel is not ConVar.Chat.ChatChannel.Team and not ConVar.Chat.ChatChannel.Global and not ConVar.Chat.ChatChannel.Local)
-            {
+            if (channel is not Chat.ChatChannel.Team and not Chat.ChatChannel.Global and not Chat.ChatChannel.Local)
                 return;
-            }
 
-            _RustAppEngine?.ChatWorker?.SaveChatMessage(new CourtApi.PluginChatMessageDto
-            {
-                steam_id = player.UserIDString,
-                is_team = channel == ConVar.Chat.ChatChannel.Team,
-                text = message
-            });
+            ChatWorker? worker = _RustAppEngine?.ChatWorker;
+            if (worker == null) return;
+
+            worker.SaveChatMessage(CourtApi.PluginChatMessageDto.Create(player.UserIDString, message, channel == Chat.ChatChannel.Team));
         }
 
         #endregion
@@ -2420,14 +2707,14 @@ namespace Oxide.Plugins
 
         private void CanAssignBed(BasePlayer player, SleepingBag bag, ulong targetPlayerId)
         {
-            _RustAppEngine?.SleepingBagWorker?.AddSleepingBag(new CourtApi.PluginSleepingBagDto
-            {
-                initiator_steam_id = player.UserIDString,
-                target_steam_id = targetPlayerId.ToString(),
+            SleepingBagWorker? worker = _RustAppEngine?.SleepingBagWorker;
+            if (worker == null) return;
 
-                position = bag.transform.position.ToString(),
-                are_friends = player.Team?.members?.Contains(targetPlayerId) ?? false
-            });
+            worker.AddSleepingBag(CourtApi.PluginSleepingBagDto.Create(
+                player.UserIDString,
+                GetSteamIdString(targetPlayerId),
+                bag.transform.position.ToString(),
+                player.Team?.members?.Contains(targetPlayerId) ?? false));
         }
 
         #endregion
@@ -2921,72 +3208,75 @@ namespace Oxide.Plugins
         #endregion
 
         #region Kills
-
+        
         private readonly struct HitRecord
         {
-            public readonly BasePlayer InitiatorPlayer;
+            public readonly string? InitiatorSteamId;
             public readonly string Weapon;
             public readonly float Distance;
             public readonly bool IsHeadshot;
-            public HitRecord(HitInfo info)
+
+            public HitRecord(HitInfo? info)
             {
                 if (info is null)
-                {
                     return;
-                }
 
-                InitiatorPlayer = info.InitiatorPlayer;
+                InitiatorSteamId = info.InitiatorPlayer != null ? info.InitiatorPlayer.UserIDString : null;
 
                 Distance = info.ProjectileDistance;
                 IsHeadshot = info.isHeadshot;
 
-                Weapon = GetName(info.Weapon) ?? GetName(info.WeaponPrefab) ?? "unknown";
+                Weapon = ResolveWeaponName(info);
             }
         }
 
-        private void OnPlayerWound(BasePlayer instance, HitInfo info)
+        private void OnPlayerWound(BasePlayer player, HitInfo? info)
         {
-            if (_RustAppEngine?.KillsWorker == null || info?.InitiatorPlayer is null || info.InitiatorPlayer == instance)
+            if (_RustAppEngine?.KillsWorker == null || !IsRealSteamId(player) || info?.InitiatorPlayer is null || info.InitiatorPlayer == player)
             {
                 return;
             }
 
             // Bombardir: We can't save HitInfo there as it's pooled and will be invalid after this function completes.
-            _RustAppEngine.KillsWorker.WoundedHits[instance.UserIDString] = new HitRecord(info);
+            _RustAppEngine.KillsWorker.WoundedHits[player.UserIDString] = new HitRecord(info);
         }
 
         private void OnPlayerRespawn(BasePlayer player)
         {
+            if (!IsRealSteamId(player))
+                return;
+            
             _RustAppEngine?.KillsWorker?.WoundedHits.Remove(player.UserIDString);
         }
 
-        void OnPlayerRecovered(BasePlayer player)
+        private void OnPlayerRecovered(BasePlayer player)
         {
+            if (!IsRealSteamId(player))
+                return;
+            
             _RustAppEngine?.KillsWorker?.WoundedHits.Remove(player.UserIDString);
         }
 
         private void OnPlayerDeath(BasePlayer player, HitInfo info)
         {
-            if (player is null)
-            {
+            if (!IsRealSteamId(player))
                 return;
-            }
 
             var hitRecord = GetRealInfo(player, info);
-            if (hitRecord.InitiatorPlayer is null || player == hitRecord.InitiatorPlayer)
+            var targetId = player.UserIDString;
+            if (hitRecord.InitiatorSteamId == null || hitRecord.InitiatorSteamId == targetId)
             {
                 return;
             }
 
             var playerUserId = player.userID.Get();
-            var targetId = player.UserIDString;
 
             NextFrame(() =>
             {
                 var log = GetCorrectCombatlog(playerUserId);
                 _RustAppEngine?.KillsWorker?.AddKill(new CourtApi.PluginKillEntryDto
                 {
-                    initiator_steam_id = hitRecord.InitiatorPlayer.UserIDString,
+                    initiator_steam_id = hitRecord.InitiatorSteamId,
                     target_steam_id = targetId,
                     distance = hitRecord.Distance,
                     game_time = Env.time.ToTimeSpan().ToShortString(),
@@ -3002,246 +3292,273 @@ namespace Oxide.Plugins
         #endregion
 
         #region Interface
-
+        
         private const string ReportLayer = "UI_RP_ReportPanelUI";
+        private const string CheckLayer = "RP_PrivateLayer";
 
         private void DrawReportInterface(BasePlayer player, int page = 0, string search = "", bool redraw = false)
         {
-            var lineAmount = 6;
-            var lineMargin = 8;
-
-            var size = (float)(700 - lineMargin * lineAmount) / lineAmount;
-
-            var list = BasePlayer.activePlayerList
-                .ToList();
-
-            var finalList = list
-                .FindAll(v => v.displayName.ToLower().Contains(search) || v.UserIDString.ToLower().Contains(search) || search == null);
-
-            finalList = finalList
-                .Skip(page * 18)
-                .Take(18)
-                .ToList();
-
-            if (finalList.Count() == 0)
+            const int ColumnCount = 6;
+            const int PageSize = 18;
+            const int MinRows = 3;
+            const int LineMargin = 8;
+            const float size = (float)(700 - LineMargin * ColumnCount) / ColumnCount;
+            
+            bool hasSearch = !string.IsNullOrEmpty(search);
+            List<BasePlayer> filtered = Pool.Get<List<BasePlayer>>();
+            try
             {
-                if (search == null)
+                ListHashSet<BasePlayer>? src = BasePlayer.activePlayerList;
+                if (!hasSearch)
+                {
+                    for (int i = 0; i < src.Count; i++) filtered.Add(src[i]);
+                }
+                else
+                {
+                    for (int i = 0; i < src.Count; i++)
+                    {
+                        BasePlayer? p = src[i];
+                        if (p.displayName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                         || p.UserIDString.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                            filtered.Add(p);
+                    }
+                }
+
+                int total = filtered.Count;
+                int start = page * PageSize;
+                int end = Math.Min(start + PageSize, total);
+                int shown = Math.Max(0, end - start);
+
+                if (shown == 0 && !hasSearch && page > 0)
                 {
                     DrawReportInterface(player, page - 1);
                     return;
                 }
-            }
 
-            CuiElementContainer container = new CuiElementContainer();
+                bool hasNextPage = total > end;
+                bool hasPrevPage = page > 0;
 
-            if (!redraw)
-            {
+                double nowTs = CurrentTime();
+                double checkExpireSeconds = _Settings.report_ui_show_check_in * 24 * 60 * 60;
+
+                CuiElementContainer container = new CuiElementContainer();
+
+                if (!redraw)
+                {
+                    container.Add(new CuiPanel
+                    {
+                        CursorEnabled = true,
+                        RectTransform = { OffsetMax = "0 0" },
+                        Image = { Color = "0 0 0 0.8", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+                    }, "Overlay", ReportLayer, ReportLayer);
+                    
+                    container.Add(new CuiButton()
+                    {
+                        RectTransform = { OffsetMax = "0 0" },
+                        Button = { Color = "0.20 0.20 0.20 1.00", Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Close = ReportLayer },
+                        Text = { Text = "" }
+                    }, ReportLayer);
+                }
+
                 container.Add(new CuiPanel
                 {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                    Image = { Color = "0 0 0 0.8", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
-                }, "Overlay", ReportLayer, ReportLayer);
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-368 -200", OffsetMax = "368 142" },
+                    Image = { Color = "1 0 0 0" }
+                }, ReportLayer, ReportLayer + ".C", ReportLayer + ".C");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "1 0", OffsetMin = "-36 0", OffsetMax = "0 0" },
+                    Image = { Color = "0 0 1 0" }
+                }, ReportLayer + ".C", ReportLayer + ".R");
 
                 container.Add(new CuiButton()
                 {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                    Button = { Color = HexToRustFormat("#343434"), Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Close = ReportLayer },
-                    Text = { Text = "" }
-                }, ReportLayer);
-            }
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.5", OffsetMin = "0 0", OffsetMax = "0 -4" },
+                    Button = {
+                      Color = hasNextPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
+                      Command = UICommand((player, args, input) => {
+                        DrawReportInterface(player, args.page, args.search, true);
 
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-368 -200", OffsetMax = "368 142" },
-                Image = { Color = "1 0 0 0" }
-            }, ReportLayer, ReportLayer + ".C", ReportLayer + ".C");
+                        PlayEffect(player, FxButtonUnpress);
+                      }, new { search = search, page = hasNextPage ? page + 1 : page }, "nextPageGo")
+                    },
+                    Text = { Text = "↓", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasNextPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
+                }, ReportLayer + ".R", ReportLayer + ".RD");
 
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 1", OffsetMin = "-36 0", OffsetMax = "0 0" },
-                Image = { Color = "0 0 1 0" }
-            }, ReportLayer + ".C", ReportLayer + ".R");
-
-            container.Add(new CuiButton()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.5", OffsetMin = "0 0", OffsetMax = "0 -4" },
-                Button = {
-          Color = HexToRustFormat($"#{(list.Count > 18 && finalList.Count() == 18 ? "D0C6BD4D" : "D0C6BD33")}"),
-          Command = UICommand((player, args, input) => {
-            DrawReportInterface(player, args.page, args.search, true);
-
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
-          }, new { search = search, page = list.Count > 18 && finalList.Count() == 18 ? page + 1 : page }, "nextPageGo")
-        },
-                Text = { Text = "↓", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 24, Color = HexToRustFormat($"{(list.Count > 18 && finalList.Count() == 18 ? "D0C6BD" : "D0C6BD4D")}") }
-            }, ReportLayer + ".R", ReportLayer + ".RD");
-
-            container.Add(new CuiButton()
-            {
-                RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = "0 4", OffsetMax = "0 0" },
-                Button = {
-          Color = HexToRustFormat($"#{(page == 0 ? "D0C6BD33" : "D0C6BD4D")}"),
-          Command = UICommand((player, args, input) => {
-            DrawReportInterface(player, args.page, args.search, true);
-
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
-          }, new { search = search, page = page == 0 ? 0 : page - 1 }, "prevPageGo")
-        },
-                Text = { Text = "↑", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 24, Color = HexToRustFormat($"{(page == 0 ? "D0C6BD4D" : "D0C6BD")}") }
-            }, ReportLayer + ".R", ReportLayer + ".RU");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "1 1", AnchorMax = "1 1", OffsetMin = "-250 8", OffsetMax = "0 43" },
-                Image = { Color = HexToRustFormat("#D0C6BD33") }
-            }, ReportLayer + ".C", ReportLayer + ".S");
-
-            var searchCommand = UICommand((player, args, input) =>
-            {
-                DrawReportInterface(player, 0, input, true);
-            }, new { }, "searchForPlayer");
-
-            container.Add(new CuiElement
-            {
-                Parent = ReportLayer + ".S",
-                Components =
-          {
-              new CuiInputFieldComponent {
-                Text = $"{lang.GetMessage("Header.Search.Placeholder", this, player.UserIDString)}",
-                FontSize = 14,
-                Font = "robotocondensed-regular.ttf",
-                Color = HexToRustFormat("#D0C6BD80"),
-                Align = TextAnchor.MiddleLeft,
-                Command = searchCommand,
-                NeedsKeyboard = true
-              },
-              new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "10 0", OffsetMax = "-85 0"}
-          }
-            });
-
-            container.Add(new CuiButton
-            {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 1", OffsetMin = "-75 0", OffsetMax = "0 0" },
-                Button = { Color = HexToRustFormat("#D0C6BD"), Material = "assets/icons/greyout.mat" },
-                Text = { Text = $"{lang.GetMessage("Header.Search", this, player.UserIDString)}", Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#443F3B"), FontSize = 14, Align = TextAnchor.MiddleCenter }
-            }, ReportLayer + ".S", ReportLayer + ".SB");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0 1", AnchorMax = "0.5 1", OffsetMin = "0 7", OffsetMax = "0 47" },
-                Image = { Color = "0.8 0.8 0.8 0" }
-            }, ReportLayer + ".C", ReportLayer + ".LT");
-
-            container.Add(new CuiLabel()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                Text = { Text = $"{lang.GetMessage("Header.Find", this, player.UserIDString)} {(search != null && search.Length > 0 ? $"- {(search.Length > 20 ? search.Substring(0, 14).ToUpper() + "..." : search.ToUpper())}" : "")}", Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#D0C6BD"), FontSize = 24, Align = TextAnchor.UpperLeft }
-            }, ReportLayer + ".LT");
-
-            container.Add(new CuiLabel()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                Text = { Text = search == null || search.Length == 0 ? lang.GetMessage("Header.SubDefault", this, player.UserIDString) : finalList.Count() == 0 ? lang.GetMessage("Header.SubFindEmpty", this, player.UserIDString) : lang.GetMessage("Header.SubFindResults", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat("#D0C6BD4D"), FontSize = 14, Align = TextAnchor.LowerLeft }
-            }, ReportLayer + ".LT");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "-40 0" },
-                Image = { Color = "0 1 0 0" }
-            }, ReportLayer + ".C", ReportLayer + ".L");
-
-            for (var y = 0; y < Math.Max((int)Math.Ceiling((float)finalList.Count / lineAmount), 3); y++)
-            {
-                for (var x = 0; x < 6; x++)
+                container.Add(new CuiButton()
                 {
-                    var target = finalList.ElementAtOrDefault(y * 6 + x);
-                    if (target)
+                    RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = "0 4", OffsetMax = "0 0" },
+                    Button = {
+                      Color = hasPrevPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
+                      Command = UICommand((player, args, input) => {
+                        DrawReportInterface(player, args.page, args.search, true);
+
+                        PlayEffect(player, FxButtonUnpress);
+                      }, new { search = search, page = hasPrevPage ? page - 1 : 0 }, "prevPageGo")
+                    },
+                    Text = { Text = "↑", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasPrevPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
+                }, ReportLayer + ".R", ReportLayer + ".RU");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "1 1", OffsetMin = "-250 8", OffsetMax = "0 43" },
+                    Image = { Color = "0.816 0.776 0.741 0.2" }
+                }, ReportLayer + ".C", ReportLayer + ".S");
+
+                string searchCommand = UICommand((player, args, input) =>
+                {
+                    DrawReportInterface(player, 0, input, true);
+                }, new { }, "searchForPlayer");
+
+                container.Add(new CuiElement
+                {
+                    Parent = ReportLayer + ".S",
+                    Components =
                     {
-                        container.Add(new CuiPanel
+                        new CuiInputFieldComponent {
+                            Text = $"{lang.GetMessage("Header.Search.Placeholder", this, player.UserIDString)}",
+                            FontSize = 14,
+                            Font = "robotocondensed-regular.ttf",
+                            Color = "0.816 0.776 0.741 0.5",
+                            Align = TextAnchor.MiddleLeft,
+                            Command = searchCommand,
+                            NeedsKeyboard = true
+                        },
+                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "10 0", OffsetMax = "-85 0"}
+                    }
+                });
+
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = "1 0", OffsetMin = "-75 0", OffsetMax = "0 0" },
+                    Button = { Color = "0.816 0.776 0.741", Material = "assets/icons/greyout.mat" },
+                    Text = { Text = $"{lang.GetMessage("Header.Search", this, player.UserIDString)}", Color = "0.267 0.247 0.231", Align = TextAnchor.MiddleCenter }
+                }, ReportLayer + ".S", ReportLayer + ".SB");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "0 1", AnchorMax = "0.5 1", OffsetMin = "0 7", OffsetMax = "0 47" },
+                    Image = { Color = "0.8 0.8 0.8 0" }
+                }, ReportLayer + ".C", ReportLayer + ".LT");
+
+                container.Add(new CuiLabel()
+                {
+                    RectTransform = { OffsetMax = "0 0" },
+                    Text = { Text = $"{lang.GetMessage("Header.Find", this, player.UserIDString)} {(hasSearch ? $"- {(search.Length > 20 ? search.Substring(0, 14).ToUpper() + "..." : search.ToUpper())}" : "")}", Color = "0.816 0.776 0.741", FontSize = 24, Align = TextAnchor.UpperLeft }
+                }, ReportLayer + ".LT");
+
+                container.Add(new CuiLabel()
+                {
+                    RectTransform = { OffsetMax = "0 0" },
+                    Text = { Text = !hasSearch ? lang.GetMessage("Header.SubDefault", this, player.UserIDString) : total == 0 ? lang.GetMessage("Header.SubFindEmpty", this, player.UserIDString) : lang.GetMessage("Header.SubFindResults", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = "0.816 0.776 0.741 0.3", Align = TextAnchor.LowerLeft }
+                }, ReportLayer + ".LT");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { OffsetMax = "-40 0" },
+                    Image = { Color = "0 1 0 0" }
+                }, ReportLayer + ".C", ReportLayer + ".L");
+
+                int rowCount = Math.Max((shown + ColumnCount - 1) / ColumnCount, MinRows);
+                for (int y = 0; y < rowCount; y++)
+                {
+                    for (int x = 0; x < ColumnCount; x++)
+                    {
+                        int idx = start + y * ColumnCount + x;
+                        BasePlayer? target = idx < end ? filtered[idx] : null;
+
+                        if (target != null)
                         {
-                            RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}", OffsetMax = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}" },
-                            Image = { Color = HexToRustFormat("#D0C6BD33") }
-                        }, ReportLayer + ".L", ReportLayer + $".{target.UserIDString}");
+                            string? targetId = target.UserIDString;
 
-                        container.Add(new CuiElement
-                        {
-                            Parent = ReportLayer + $".{target.UserIDString}",
-                            Components =
-              {
-                // Do not change in devblogs
-                new CuiRawImageComponent { SteamId= target.UserIDString, Sprite = "assets/icons/loading.png" },
-                new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
-              }
-                        });
-
-                        container.Add(new CuiPanel()
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                            Image = { Sprite = "assets/content/ui/ui.background.transparent.linear.psd", Color = HexToRustFormat("#282828f2") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        string normaliseName = NormalizeString(target.displayName);
-
-                        string name = normaliseName.Length > 14 ? normaliseName.Substring(0, 15) + ".." : normaliseName;
-
-                        container.Add(new CuiLabel
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "6 16", OffsetMax = "0 0" },
-                            Text = { Text = name, Align = TextAnchor.LowerLeft, Font = "robotocondensed-bold.ttf", FontSize = 13, Color = HexToRustFormat("#D0C6BD") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        container.Add(new CuiLabel
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "6 5", OffsetMax = "0 0" },
-                            Text = { Text = target.UserIDString, Align = TextAnchor.LowerLeft, Font = "robotocondensed-regular.ttf", FontSize = 10, Color = HexToRustFormat("#D0C6BD80") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        var min = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}";
-                        var max = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}";
-
-                        var showPlayerCommand = UICommand((player, args, input) =>
-                        {
-                            DrawPlayerReportReasons(player, args.steam_id, args.min, args.max, args.left);
-                        }, new { steam_id = target.UserIDString, min, max, left = x >= 3 }, "showPlayerReportReasons");
-
-                        container.Add(new CuiButton()
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                            Button = { Color = "0 0 0 0", Command = showPlayerCommand },
-                            Text = { Text = "" }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        var was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
-                        if (was_checked)
-                        {
                             container.Add(new CuiPanel
                             {
-                                RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
-                                Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
-                            }, ReportLayer + $".{target.UserIDString}", ReportLayer + $".{target.UserIDString}.Recent");
+                                RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}", OffsetMax = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}" },
+                                Image = { Color = "0.816 0.776 0.741 0.2" }
+                            }, ReportLayer + ".L", ReportLayer + $".{targetId}");
+
+                            container.Add(new CuiElement
+                            {
+                                Parent = ReportLayer + $".{targetId}",
+                                Components =
+                                {
+                                    // Do not change in devblogs
+                                    new CuiRawImageComponent { SteamId = targetId, Sprite = "assets/icons/loading.png" },
+                                    new CuiRectTransformComponent { OffsetMax = "0 0" }
+                                }
+                            });
+
+                            container.Add(new CuiPanel()
+                            {
+                                RectTransform = { OffsetMax = "0 0" },
+                                Image = { Sprite = "assets/content/ui/ui.background.transparent.linear.psd", Color = "0.157 0.157 0.157 0.95" }
+                            }, ReportLayer + $".{targetId}");
+
+                            string normaliseName = NormalizeString(target.displayName);
+                            string name = normaliseName.Length > 14 ? normaliseName.Substring(0, 15) + ".." : normaliseName;
 
                             container.Add(new CuiLabel
                             {
-                                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                                Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
-                            }, ReportLayer + $".{target.UserIDString}.Recent");
+                                RectTransform = { OffsetMin = "6 16", OffsetMax = "0 0" },
+                                Text = { Text = name, Align = TextAnchor.LowerLeft, FontSize = 13, Color = "0.816 0.776 0.741" }
+                            }, ReportLayer + $".{targetId}");
+
+                            container.Add(new CuiLabel
+                            {
+                                RectTransform = { OffsetMin = "6 5", OffsetMax = "0 0" },
+                                Text = { Text = targetId, Align = TextAnchor.LowerLeft, Font = "robotocondensed-regular.ttf", FontSize = 10, Color = "0.816 0.776 0.741 0.5" }
+                            }, ReportLayer + $".{targetId}");
+
+                            string min = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}";
+                            string max = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}";
+
+                            string showPlayerCommand = UICommand((player, args, input) =>
+                            {
+                                DrawPlayerReportReasons(player, args.steam_id, args.min, args.max, args.left);
+                            }, new { steam_id = targetId, min, max, left = x >= 3 }, "showPlayerReportReasons");
+
+                            container.Add(new CuiButton()
+                            {
+                                RectTransform = { OffsetMax = "0 0" },
+                                Button = { Color = "0 0 0 0", Command = showPlayerCommand },
+                                Text = { Text = "" }
+                            }, ReportLayer + $".{targetId}");
+
+                            bool wasChecked = _CheckInfo.LastChecks.TryGetValue(targetId, out double lastCheck)
+                                              && nowTs - lastCheck < checkExpireSeconds;
+                            if (wasChecked)
+                            {
+                                container.Add(new CuiPanel
+                                {
+                                    RectTransform = { AnchorMin = "0 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
+                                    Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
+                                }, ReportLayer + $".{targetId}", ReportLayer + $".{targetId}.Recent");
+
+                                container.Add(new CuiLabel
+                                {
+                                    RectTransform = { OffsetMax = "0 0" },
+                                    Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
+                                }, ReportLayer + $".{targetId}.Recent");
+                            }
+                        }
+                        else
+                        {
+                            container.Add(new CuiPanel
+                            {
+                                RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}", OffsetMax = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}" },
+                                Image = { Color = "0.816 0.776 0.741 0.2" }
+                            }, ReportLayer + ".L");
                         }
                     }
-                    else
-                    {
-                        container.Add(new CuiPanel
-                        {
-                            RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}", OffsetMax = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}" },
-                            Image = { Color = HexToRustFormat("#D0C6BD33") }
-                        }, ReportLayer + ".L");
-                    }
                 }
-            }
 
-            CuiHelper.AddUi(player, container);
+                CuiHelper.AddUi(player, container);
+            }
+            finally
+            {
+                Pool.FreeUnmanaged(ref filtered);
+            }
         }
 
         private void DrawPlayerReportReasons(BasePlayer player, string targetId, string min, string max, bool leftAlign)
@@ -3253,8 +3570,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxButtonUnpress);
 
             CuiElementContainer container = new CuiElementContainer();
             CuiHelper.DestroyUi(player, ReportLayer + $".T");
@@ -3268,7 +3584,7 @@ namespace Oxide.Plugins
 
             container.Add(new CuiButton()
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
+                RectTransform = { OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
                 Button = { Close = $"{ReportLayer}.T", Color = "0 0 0 1", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
             }, ReportLayer + $".T");
 
@@ -3276,12 +3592,12 @@ namespace Oxide.Plugins
             container.Add(new CuiButton()
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? -1 : 2)} 0", AnchorMax = $"{(leftAlign ? -2 : 3)} 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
-                Button = { Close = $"{ReportLayer}.T", Color = HexToRustFormat("#343434"), Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
+                Button = { Close = $"{ReportLayer}.T", Color = "0.204 0.204 0.204", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
             }, ReportLayer + $".T");
 
             container.Add(new CuiButton()
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"-1111111 -1111111", OffsetMax = $"1111111 1111111" },
+                RectTransform = { AnchorMax = "1 1", OffsetMin = $"-1111111 -1111111", OffsetMax = $"1111111 1111111" },
                 Button = { Close = $"{ReportLayer}.T", Color = "0 0 0 0.5", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
             }, ReportLayer + $".T");
 
@@ -3289,13 +3605,13 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? "0" : "1")} 0", AnchorMax = $"{(leftAlign ? "0" : "1")} 1", OffsetMin = $"{(leftAlign ? "-350" : "20")} 0", OffsetMax = $"{(leftAlign ? "-20" : "350")} -5" },
-                Text = { FadeIn = 0.4f, Text = lang.GetMessage("Subject.Head", this, player.UserIDString), Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#D0C6BD"), FontSize = 24, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
+                Text = { FadeIn = 0.4f, Text = lang.GetMessage("Subject.Head", this, player.UserIDString), Color = "0.816 0.776 0.741", FontSize = 24, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
             }, ReportLayer + ".T");
 
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? "0" : "1")} 0", AnchorMax = $"{(leftAlign ? "0" : "1")} 1", OffsetMin = $"{(leftAlign ? "-250" : "20")} 0", OffsetMax = $"{(leftAlign ? "-20" : "250")} -35" },
-                Text = { FadeIn = 0.4f, Text = $"{lang.GetMessage("Subject.SubHead", this, player.UserIDString).Replace("%PLAYER%", $"<b>{target.displayName}</b>")}", Font = "robotocondensed-regular.ttf", Color = HexToRustFormat("#D0C6BD80"), FontSize = 14, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
+                Text = { FadeIn = 0.4f, Text = $"{lang.GetMessage("Subject.SubHead", this, player.UserIDString).Replace("%PLAYER%", $"<b>{target.displayName}</b>")}", Font = "robotocondensed-regular.ttf", Color = "0.816 0.776 0.741 0.5", FontSize = 14, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
             }, ReportLayer + ".T");
 
             container.Add(new CuiElement
@@ -3304,24 +3620,24 @@ namespace Oxide.Plugins
                 Components = {
                     // Do not change in devblogs
                     new CuiRawImageComponent { SteamId = target.UserIDString, Sprite = "assets/icons/loading.png" },
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
+                    new CuiRectTransformComponent { OffsetMax = "0 0" }
                 }
             });
 
             try
             {
-                var was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+                bool was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
                 if (was_checked)
                 {
                     container.Add(new CuiPanel
                     {
-                        RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
+                        RectTransform = { AnchorMin = "0 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
                         Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
                     }, ReportLayer + $".T", ReportLayer + $".T.Recent");
 
                     container.Add(new CuiLabel
                     {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
+                        RectTransform = { OffsetMax = "0 0" },
                         Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
                     }, ReportLayer + $".T.Recent");
                 }
@@ -3333,12 +3649,12 @@ namespace Oxide.Plugins
 
             try
             {
-                for (var i = 0; i < _Settings.report_ui_reasons.Count; i++)
+                for (int i = 0; i < _Settings.report_ui_reasons.Count; i++)
                 {
-                    var offXMin = (20 + (i * 5)) + i * 80;
-                    var offXMax = 20 + (i * 5) + (i + 1) * 80;
+                    int offXMin = (20 + (i * 5)) + i * 80;
+                    int offXMax = 20 + (i * 5) + (i + 1) * 80;
 
-                    var sendReportCommand = UICommand((player, args, input) =>
+                    string sendReportCommand = UICommand((player, args, input) =>
                     {
                         SendReport(player, args.target_id, args.reason);
                     }, new { target_id = target.UserIDString, reason = _Settings.report_ui_reasons[i] }, "sendReportToPlayer");
@@ -3346,8 +3662,8 @@ namespace Oxide.Plugins
                     container.Add(new CuiButton()
                     {
                         RectTransform = { AnchorMin = $"{(leftAlign ? 0 : 1)} 0", AnchorMax = $"{(leftAlign ? 0 : 1)} 0", OffsetMin = $"{(leftAlign ? -offXMax : offXMin)} 15", OffsetMax = $"{(leftAlign ? -offXMin : offXMax)} 45" },
-                        Button = { FadeIn = 0.4f + i * 0.2f, Color = HexToRustFormat("#D0C6BD4D"), Command = sendReportCommand },
-                        Text = { FadeIn = 0.4f + i * 0.2f, Text = $"{_Settings.report_ui_reasons[i]}", Align = TextAnchor.MiddleCenter, Color = HexToRustFormat("#D0C6BD"), Font = "robotocondensed-bold.ttf", FontSize = 16 }
+                        Button = { FadeIn = 0.4f + i * 0.2f, Color = "0.816 0.776 0.741 0.3", Command = sendReportCommand },
+                        Text = { FadeIn = 0.4f + i * 0.2f, Text = $"{_Settings.report_ui_reasons[i]}", Align = TextAnchor.MiddleCenter, Color = "0.816 0.776 0.741",  FontSize = 16 }
                     }, ReportLayer + $".T");
                 }
             }
@@ -3358,10 +3674,7 @@ namespace Oxide.Plugins
 
             CuiHelper.AddUi(player, container);
         }
-
-
-        private const string CheckLayer = "RP_PrivateLayer";
-
+        
         private void DrawNoticeInterface(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, CheckLayer);
@@ -3369,8 +3682,8 @@ namespace Oxide.Plugins
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
-                Button = { Color = HexToRustFormat("#1C1C1C"), Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" },
+                RectTransform = { AnchorMin = "0 0.5", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
+                Button = { Color = "0.11 0.11 0.11", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" },
                 Text = { Text = "", Align = TextAnchor.MiddleCenter }
             }, "Under", CheckLayer);
 
@@ -3378,23 +3691,61 @@ namespace Oxide.Plugins
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                RectTransform = { OffsetMax = "0 0" },
                 Text = { Text = text, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 16 }
             }, CheckLayer);
 
             CuiHelper.AddUi(player, container);
 
-            Effect effect = new Effect("ASSETS/BUNDLED/PREFABS/FX/INVITE_NOTICE.PREFAB".ToLower(), player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxInviteNotice);
         }
 
         #endregion
 
         #region Methods
-
-        private static string GetName(UnityEngine.Object obj)
+        
+        private static string ResolveWeaponName(HitInfo? info)
         {
-            return obj == null ? null : obj?.name;
+            if (info == null) return "unknown";
+
+            Item? item = info.Weapon != null ? info.Weapon.GetItem() : null;
+            string? itemShortname = item?.info?.shortname;
+            if (!string.IsNullOrEmpty(itemShortname))
+                return itemShortname!;
+
+            string? weaponPrefabShort = info.WeaponPrefab != null ? info.WeaponPrefab.ShortPrefabName : null;
+            if (!string.IsNullOrEmpty(weaponPrefabShort))
+                return StripWeaponSuffixes(weaponPrefabShort!);
+
+            if (info.ProjectilePrefab != null && !string.IsNullOrEmpty(info.ProjectilePrefab.name))
+                return StripWeaponSuffixes(info.ProjectilePrefab.name);
+
+            if (info.Initiator != null && !string.IsNullOrEmpty(info.Initiator.ShortPrefabName))
+                return StripWeaponSuffixes(info.Initiator.ShortPrefabName);
+
+            if (info.damageTypes != null)
+            {
+                DamageType dt = info.damageTypes.GetMajorityDamageType();
+                if (dt != DamageType.Generic)
+                    return dt.ToString().ToLowerInvariant();
+            }
+
+            return "unknown";
+        }
+        
+        private static string StripWeaponSuffixes(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+
+            const string SuffixEntity = ".entity";
+            const string SuffixDeployed = ".deployed";
+
+            if (name.EndsWith(SuffixDeployed, StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - SuffixDeployed.Length);
+            if (name.EndsWith(SuffixEntity, StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - SuffixEntity.Length);
+
+            return name;
         }
 
         private static List<CourtApi.CombatLogEventDto> GetCorrectCombatlog(ulong target)
@@ -3545,6 +3896,11 @@ namespace Oxide.Plugins
         {
             UnityEngine.Object.Destroy(_RustAppEngine?.gameObject);
 
+
+            if (CourtApi.players != null)
+                foreach (CourtApi.PluginStatePlayerDto? dto in CourtApi.players.Values)
+                    dto.FreePooledFields();
+
             // Clean-up stale static references
             _RustApp = null;
             _MetaInfo = null;
@@ -3557,14 +3913,13 @@ namespace Oxide.Plugins
 
         private void BanCreate(string steamId, CourtApi.PluginBanCreatePayload payload)
         {
-            CourtApi.BanCreate(payload).Execute(() =>
-            {
-                Log($"Player {steamId} banned for {payload.reason}");
-            },
-            (err) =>
-            {
-                Error($"Failed to ban {steamId}. Reason: {err}");
-            });
+            string reason = payload.reason;
+
+            CourtApi.BanCreate(payload).Execute(
+                () => Log($"Player {steamId} banned for {reason}"),
+                (err) => Error($"Failed to ban {steamId}. Reason: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private void BanDelete(string steamId)
@@ -3887,60 +4242,39 @@ namespace Oxide.Plugins
 
         private void RustApp_PlayerMuteCreate(string targetSteamId, string reason, string duration, string comment = null, string referenceMessageText = null, bool broadcast = false)
         {
-            var request = CourtApi.PlayerMuteCreate(new CourtApi.PlayerMuteCreateDto
-            {
-                target_steam_id = targetSteamId,
-                reason = reason,
-                broadcast = broadcast,
-                comment = comment,
-                duration = duration,
-                references_message = referenceMessageText
-            });
+            CourtApi.PlayerMuteCreateDto? payload = CourtApi.PlayerMuteCreateDto.Create(targetSteamId, reason, duration, broadcast, comment, referenceMessageText);
 
-            request.Execute(() =>
-            {
-                Puts($"Player ({targetSteamId}) is muted");
-            },
-            (err) =>
-            {
-                PrintError($"Failed to mute player: {err}");
-            });
+            CourtApi.PlayerMuteCreate(payload).Execute(
+                () => Puts($"Player ({targetSteamId}) is muted"),
+                (err) => PrintError($"Failed to mute player: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private void RustApp_PlayerMuteDelete(string targetSteamId)
         {
-            var request = CourtApi.PlayerMuteDelete(new CourtApi.PlayerMuteDeleteDto
-            {
-                target_steam_id = targetSteamId
-            });
+            CourtApi.PlayerMuteDeleteDto? payload = CourtApi.PlayerMuteDeleteDto.Create(targetSteamId);
 
-            request.Execute(() =>
-            {
-                Puts($"Player ({targetSteamId}) is unmuted");
-            },
-            (err) =>
-            {
-                PrintError($"Failed to unmute player: {err}");
-            });
+            CourtApi.PlayerMuteDelete(payload).Execute(
+                () => Puts($"Player ({targetSteamId}) is unmuted"),
+                (err) => PrintError($"Failed to unmute player: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private long? RA_IsPlayerMuted(BasePlayer player)
         {
-            var mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(player.userID);
+            CourtApi.PlayerMuteDto? mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(player.userID);
 
             return mute?.LeftSeconds();
         }
 
         private void RA_DirectMessageHandler(string from, string to, string message)
         {
-            _RustAppEngine?.ChatWorker?.SaveChatMessage(new CourtApi.PluginChatMessageDto
-            {
-                steam_id = from,
-                target_steam_id = to,
-                is_team = false,
+            ChatWorker? worker = _RustAppEngine?.ChatWorker;
+            if (worker == null) return;
 
-                text = message
-            });
+            worker.SaveChatMessage(CourtApi.PluginChatMessageDto.Create(from, message, isTeam: false, targetSteamId: to));
         }
 
         private void RA_ReportSend(string initiator_steam_id, string target_steam_id, string reason, string message = "")
@@ -3950,30 +4284,19 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var was_checked = _CheckInfo.LastChecks.ContainsKey(target_steam_id) && CurrentTime() - _CheckInfo.LastChecks[target_steam_id] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+            bool was_checked = _CheckInfo.LastChecks.ContainsKey(target_steam_id) && CurrentTime() - _CheckInfo.LastChecks[target_steam_id] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
             Interface.Oxide.CallHook("RustApp_OnPlayerReported", initiator_steam_id, target_steam_id, reason, message, was_checked);
 
-            _RustAppEngine?.ReportWorker?.SendReport(new CourtApi.PluginReportDto
-            {
-                initiator_steam_id = initiator_steam_id,
-                target_steam_id = target_steam_id,
-                sub_targets_steam_ids = new List<string>(),
-                message = message,
-                reason = reason
-            });
+            ReportWorker? worker = _RustAppEngine?.ReportWorker;
+            if (worker == null) return;
+
+            worker.SendReport(CourtApi.PluginReportDto.Create(initiator_steam_id, target_steam_id, reason, message));
         }
 
         private void RA_BanPlayer(string steam_id, string reason, string duration, bool global, bool ban_ip, string comment = "")
         {
-            BanCreate(steam_id, new CourtApi.PluginBanCreatePayload
-            {
-                reason = reason,
-                ban_ip = ban_ip,
-                comment = comment,
-                global = global,
-                target_steam_id = steam_id,
-                duration = duration.Length > 0 ? duration : null
-            });
+            BanCreate(steam_id, CourtApi.PluginBanCreatePayload.Create(
+                steam_id, reason, duration.Length > 0 ? duration : null, global, ban_ip, comment));
         }
 
         private void RA_CreateAlert(Plugin plugin, string message, object data = null, object meta = null)
@@ -4052,77 +4375,94 @@ namespace Oxide.Plugins
             Error = 1
         }
 
+        private const string FxToastSelect = "assets/bundled/prefabs/fx/notice/item.select.fx.prefab";
+        private const string FxButtonUnpress = "assets/prefabs/tools/detonator/effects/unpress.prefab";
+        private const string FxInviteNotice = "assets/bundled/prefabs/fx/invite_notice.prefab";
+
+        private static void PlayEffect(BasePlayer player, string prefabPath)
+        {
+            Effect? effect = Effect.reusableInstance;
+            effect.Init(Effect.Type.Generic, player, 0, Vector3.zero, Vector3.zero);
+            effect.pooledString = prefabPath;
+            EffectNetwork.Send(effect, player.Connection);
+        }
+
         private void SoundToast(BasePlayer player, string text, SoundToastType type)
         {
-            Effect effect = new Effect("assets/bundled/prefabs/fx/notice/item.select.fx.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxToastSelect);
 
             player.Command("gametip.showtoast", (int)type, text, 1);
         }
+        
+        [ThreadStatic] private static List<BuildingBlock> _buildAuthBlocks;
+        [ThreadStatic] private static HashSet<uint> _buildAuthSeenBuildings;
 
-        // It is more optimized way to detect building authed instead of default BasePlayer.IsBuildingAuthed()
         private static bool DetectBuildingAuth(BasePlayer player)
         {
-            const int SearchRadius = 16 + 2;
+            const float SearchRadius = 18f;
+            const float SqrRadius = SearchRadius * SearchRadius;
 
-            var pos = player.transform.position;
-            var results = Facepunch.Pool.Get<List<BuildingPrivlidge>>();
-            BaseEntity.Query.Server.GetInSphere(pos, SearchRadius, results, BaseEntity.Query.DistanceCheckType.None);
+            List<BuildingBlock> blocks = _buildAuthBlocks ??= new List<BuildingBlock>(48);
+            HashSet<uint> seenBuildings = _buildAuthSeenBuildings ??= new HashSet<uint>();
+            blocks.Clear();
+            seenBuildings.Clear();
 
-            var isAuthed = false;
-            foreach (var privledge in results)
+            Vector3 pos = player.transform.position;
+            BaseEntity.Query.Server.GetInSphere(pos, SearchRadius, blocks, BaseEntity.Query.DistanceCheckType.None);
+
+            ulong userId = player.userID;
+            int blockCount = blocks.Count;
+
+            for (int i = 0; i < blockCount; i++)
             {
-                if ((privledge.transform.position - pos).sqrMagnitude <= SearchRadius * SearchRadius)
-                {
-                    isAuthed = privledge.IsAuthed(player);
-                    break;
-                }
+                BuildingBlock? block = blocks[i];
+                if ((block.transform.position - pos).sqrMagnitude > SqrRadius) continue;
+
+                if (!seenBuildings.Add(block.buildingID)) continue;
+
+                BuildingManager.Building? building = block.GetBuilding();
+                if (building == null) continue;
+
+                BuildingPrivlidge? tc = building.GetDominatingBuildingPrivilege();
+                if (!tc || !tc.authorizedPlayers.Contains(userId)) continue;
+
+                blocks.Clear();
+                seenBuildings.Clear();
+                return true;
             }
 
-            Facepunch.Pool.FreeUnmanaged(ref results);
-            return isAuthed;
+            blocks.Clear();
+            seenBuildings.Clear();
+            return false;
         }
-
-        private static string HexToRustFormat(string hex)
+        
+        private static readonly HashSet<char> _normalizeAllowed = new()
         {
-            if (string.IsNullOrEmpty(hex))
-            {
-                hex = "#FFFFFFFF";
-            }
-
-            var str = hex.Trim('#');
-
-            if (str.Length == 6)
-                str += "FF";
-
-            if (str.Length != 8)
-            {
-                throw new Exception(hex);
-            }
-
-            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
-            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
-            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
-            var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
-
-            UnityEngine.Color color = new Color32(r, g, b, a);
-
-            return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
-        }
-
-        private static List<char> Letters = new List<char> { '☼', 's', 't', 'r', 'e', 'т', 'ы', 'в', 'о', 'ч', 'х', 'а', 'р', 'u', 'c', 'h', 'a', 'n', 'z', 'o', '^', 'm', 'l', 'b', 'i', 'p', 'w', 'f', 'k', 'y', 'v', '$', '+', 'x', '1', '®', 'd', '#', 'г', 'ш', 'к', '.', 'я', 'у', 'с', 'ь', 'ц', 'и', 'б', 'е', 'л', 'й', '_', 'м', 'п', 'н', 'g', 'q', '3', '4', '2', ']', 'j', '[', '8', '{', '}', '_', '!', '@', '#', '$', '%', '&', '?', '-', '+', '=', '~', ' ', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п', 'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ь', 'ы', 'ъ', 'э', 'ю', 'я' };
+            '☼', '^', '$', '+', '®', '#', '.', '_', ']', '[', '{', '}', '!', '@', '%', '&', '?', '-', '=', '~', ' ',
+            '1', '2', '3', '4', '8',
+            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+            'а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п', 'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ь', 'ы', 'ъ', 'э', 'ю', 'я'
+        };
 
         private static string NormalizeString(string text)
         {
-            string name = "";
+            if (string.IsNullOrEmpty(text)) return string.Empty;
 
-            foreach (var @char in text)
+            StringBuilder? sb = Pool.Get<StringBuilder>();
+            try
             {
-                if (Letters.Contains(@char.ToString().ToLower().ToCharArray()[0]))
-                    name += @char;
+                for (int i = 0; i < text.Length; i++)
+                {
+                    char c = text[i];
+                    if (_normalizeAllowed.Contains(char.ToLowerInvariant(c)))
+                        sb.Append(c);
+                }
+                return sb.Length == 0 ? string.Empty : sb.ToString();
             }
-
-            return name;
+            finally
+            {
+                Pool.FreeUnmanaged(ref sb);
+            }
         }
 
         private static bool DetectIsRaidBlock(BasePlayer player)
@@ -4220,7 +4560,13 @@ namespace Oxide.Plugins
 
         private bool CloseConnection(string steamId, string reason)
         {
-            var player = BasePlayer.Find(steamId);
+            if (!ulong.TryParse(steamId, out ulong targetUserId))
+            {
+                Error($"Failed to close connection with {steamId}: {reason} (not a valid ulong)");
+                return false;
+            }
+            
+            BasePlayer? player = BasePlayer.FindByID(targetUserId);
             if (player != null && player.IsConnected)
             {
                 Log($"Closing connection with {steamId}: {reason} (by player)");
@@ -4229,29 +4575,41 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            var connection = ConnectionAuth.m_AuthConnection.Find(v => v.userid.ToString() == steamId);
-            if (connection != null)
+            List<Connection>? authList = ConnectionAuth.m_AuthConnection;
+            for (int i = 0; i < authList.Count; i++)
             {
+                Connection? c = authList[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by m_AuthConnection)");
-                Network.Net.sv.Kick(connection, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            var loading = ServerMgr.Instance.connectionQueue.joining.Find(v => v.userid.ToString() == steamId);
-            if (loading != null)
+            List<Connection>? joining = ServerMgr.Instance.connectionQueue.joining;
+            for (int i = 0; i < joining.Count; i++)
             {
+                Connection? c = joining[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by joining)");
-                Network.Net.sv.Kick(loading, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            var queued = ServerMgr.Instance.connectionQueue.queue.Find(v => v.userid.ToString() == steamId);
-            if (queued != null)
+            List<Connection>? queue = ServerMgr.Instance.connectionQueue.queue;
+            for (int i = 0; i < queue.Count; i++)
             {
+                Connection? c = queue[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by queued)");
-                Network.Net.sv.Kick(queued, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
@@ -4281,6 +4639,28 @@ namespace Oxide.Plugins
 
             return ipWithPort;
         }
+        
+        private const ulong SteamId64Base = 76561197960265728UL;
+
+        public static bool IsRealSteamId(ulong userId) => userId >= SteamId64Base;
+
+        public static bool IsRealSteamId(string steamId)
+            => !string.IsNullOrEmpty(steamId) && ulong.TryParse(steamId, out ulong id) && id >= SteamId64Base;
+
+        public static bool IsRealSteamId(BasePlayer player)
+            => player.userID >= SteamId64Base;
+        
+        private static readonly Dictionary<ulong, string> _steamIdStringCache = new();
+
+        public static string GetSteamIdString(ulong userId)
+        {
+            if (_steamIdStringCache.TryGetValue(userId, out string? cached))
+                return cached;
+
+            string s = userId.ToString();
+            _steamIdStringCache[userId] = s;
+            return s;
+        }
 
         private double CurrentTime() => DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
 
@@ -4296,16 +4676,18 @@ namespace Oxide.Plugins
 
         private string UICommand<T>(Action<BasePlayer, T, string> callback, T arg, string commandName)
         {
-            var argument = $" {JsonConvert.SerializeObject(arg)}~INPUT_LIMITTER~";
+            string argument = $" {JsonConvert.SerializeObject(arg)}~INPUT_LIMITTER~";
 
-            if (UICommands.ContainsKey(commandName))
+            if (UICommands.TryGetValue(commandName, out string? command))
             {
-                return UICommands[commandName] + argument;
+                return command + argument;
             }
 
-            var commandUuid = CuiHelper.GetGuid();
+            string? commandUuid = CuiHelper.GetGuid();
 
             UICommands.Add(commandName, commandUuid);
+
+            const string Sep = "~INPUT_LIMITTER~";
 
             cmd.AddConsoleCommand(commandUuid, this, (args) =>
             {
@@ -4313,22 +4695,22 @@ namespace Oxide.Plugins
 
                 try
                 {
-                    var str = "";
-                    var input = "";
-
-                    args?.Args?.ToList()?.ForEach(v =>
+                    string str = "";
+                    string input = "";
+                    
+                    StringView[]? rawArgs = args?.Args;
+                    if (rawArgs is { Length: > 0 })
                     {
-                        str += $"{v} ";
-                    });
-
-                    if (str.Contains("~INPUT_LIMITTER~"))
+                        str = string.Join(" ", rawArgs);
+                    }
+                    
+                    int sepIdx = str.IndexOf(Sep, StringComparison.Ordinal);
+                    if (sepIdx >= 0)
                     {
                         try
                         {
-                            string[] parts = str.Split(new string[] { "~INPUT_LIMITTER~" }, StringSplitOptions.None);
-
-                            input = parts[1].Trim();
-                            str = parts[0];
+                            input = str.Substring(sepIdx + Sep.Length).Trim();
+                            str = str.Substring(0, sepIdx);
                         }
                         catch (Exception exc4)
                         {
@@ -4339,20 +4721,9 @@ namespace Oxide.Plugins
 
                     try
                     {
-                        while (str.Contains("\\r "))
-                        {
-                            str = str.Replace("\\r ", "");
-                        }
-                        while (str.Contains("\r "))
-                        {
-                            str = str.Replace("\r ", "");
-                        }
-                        while (str.Contains("\r"))
-                        {
-                            str = str.Replace("\r", "");
-                        }
+                        str = str.Replace("\\r ", "").Replace("\r ", "").Replace("\r", "");
 
-                        var restoredArgument = JsonConvert.DeserializeObject<T>(str);
+                        T? restoredArgument = JsonConvert.DeserializeObject<T>(str);
 
                         try
                         {
