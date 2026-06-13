@@ -267,10 +267,13 @@ namespace Oxide.Plugins
 
             public class PluginChatMessagePayload : Pool.IPooled
             {
-                public List<PluginChatMessageDto> messages;
+                public List<PluginChatMessageDto>? messages;
 
                 public void LeavePool() => messages = Pool.Get<List<PluginChatMessageDto>>();
-                public void EnterPool() => Pool.FreeUnmanaged(ref messages);
+                public void EnterPool()
+                {
+                    if (messages != null) Pool.FreeUnmanaged(ref messages);
+                }
             }
 
             public static StableRequest<object> SendChatMessages(PluginChatMessagePayload payload)
@@ -314,10 +317,13 @@ namespace Oxide.Plugins
 
             public class PluginReportBatchPayload : Pool.IPooled
             {
-                public List<PluginReportDto> reports;
+                public List<PluginReportDto>? reports;
 
                 public void LeavePool() => reports = Pool.Get<List<PluginReportDto>>();
-                public void EnterPool() => Pool.FreeUnmanaged(ref reports);
+                public void EnterPool()
+                {
+                    if (reports != null) Pool.FreeUnmanaged(ref reports);
+                }
             }
 
             public static StableRequest<object> SendReports(PluginReportBatchPayload payload)
