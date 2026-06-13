@@ -811,8 +811,27 @@ namespace Oxide.Plugins
 
             public static void write(CheckInfo courtMeta)
             {
-                // Clear checks > 30 days ago
-                courtMeta.LastChecks = courtMeta.LastChecks.Where(v => _RustApp.CurrentTime() - v.Value < 30 * 24 * 60 * 60).ToDictionary(v => v.Key, v => v.Value);
+                const double ThirtyDaysSeconds = 30 * 24 * 60 * 60;
+                double now = _RustApp.CurrentTime();
+
+                List<string>? toRemove = Pool.Get<List<string>>();
+                try
+                {
+                    foreach (KeyValuePair<string, double> kv in courtMeta.LastChecks)
+                    {
+                        if (now - kv.Value >= ThirtyDaysSeconds)
+                            toRemove.Add(kv.Key);
+                    }
+                    
+                    for (int i = 0; i < toRemove.Count; i++)
+                    {
+                        courtMeta.LastChecks.Remove(toRemove[i]);
+                    }
+                }
+                finally
+                {
+                    Pool.FreeUnmanaged(ref toRemove);
+                }
 
                 Interface.Oxide.DataFileSystem.WriteObject("RustApp_CheckMeta", courtMeta);
             }
