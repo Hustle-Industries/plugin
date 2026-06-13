@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using ConVar;
+using Facepunch;
 using JetBrains.Annotations;
 using Network;
 using Newtonsoft.Json;
@@ -4433,16 +4434,18 @@ namespace Oxide.Plugins
 
         private string UICommand<T>(Action<BasePlayer, T, string> callback, T arg, string commandName)
         {
-            var argument = $" {JsonConvert.SerializeObject(arg)}~INPUT_LIMITTER~";
+            string argument = $" {JsonConvert.SerializeObject(arg)}~INPUT_LIMITTER~";
 
-            if (UICommands.ContainsKey(commandName))
+            if (UICommands.TryGetValue(commandName, out string? command))
             {
-                return UICommands[commandName] + argument;
+                return command + argument;
             }
 
-            var commandUuid = CuiHelper.GetGuid();
+            string? commandUuid = CuiHelper.GetGuid();
 
             UICommands.Add(commandName, commandUuid);
+
+            const string Sep = "~INPUT_LIMITTER~";
 
             cmd.AddConsoleCommand(commandUuid, this, (args) =>
             {
@@ -4450,22 +4453,22 @@ namespace Oxide.Plugins
 
                 try
                 {
-                    var str = "";
-                    var input = "";
-
-                    args?.Args?.ToList()?.ForEach(v =>
+                    string str = "";
+                    string input = "";
+                    
+                    StringView[]? rawArgs = args?.Args;
+                    if (rawArgs is { Length: > 0 })
                     {
-                        str += $"{v} ";
-                    });
-
-                    if (str.Contains("~INPUT_LIMITTER~"))
+                        str = string.Join(" ", rawArgs);
+                    }
+                    
+                    int sepIdx = str.IndexOf(Sep, StringComparison.Ordinal);
+                    if (sepIdx >= 0)
                     {
                         try
                         {
-                            string[] parts = str.Split(new string[] { "~INPUT_LIMITTER~" }, StringSplitOptions.None);
-
-                            input = parts[1].Trim();
-                            str = parts[0];
+                            input = str.Substring(sepIdx + Sep.Length).Trim();
+                            str = str.Substring(0, sepIdx);
                         }
                         catch (Exception exc4)
                         {
@@ -4476,20 +4479,9 @@ namespace Oxide.Plugins
 
                     try
                     {
-                        while (str.Contains("\\r "))
-                        {
-                            str = str.Replace("\\r ", "");
-                        }
-                        while (str.Contains("\r "))
-                        {
-                            str = str.Replace("\r ", "");
-                        }
-                        while (str.Contains("\r"))
-                        {
-                            str = str.Replace("\r", "");
-                        }
+                        str = str.Replace("\\r ", "").Replace("\r ", "").Replace("\r", "");
 
-                        var restoredArgument = JsonConvert.DeserializeObject<T>(str);
+                        T? restoredArgument = JsonConvert.DeserializeObject<T>(str);
 
                         try
                         {
