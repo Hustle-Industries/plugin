@@ -237,20 +237,40 @@ namespace Oxide.Plugins
 
             #region SendChatMessages
 
-            public class PluginChatMessageDto
+            public class PluginChatMessageDto : Pool.IPooled
             {
                 public string steam_id;
-                [CanBeNull]
                 public string target_steam_id;
-
                 public bool is_team;
-
                 public string text;
+
+                public static PluginChatMessageDto Create(string steamId, string text, bool isTeam, [CanBeNull] string targetSteamId = null)
+                {
+                    PluginChatMessageDto dto = Pool.Get<PluginChatMessageDto>();
+                    dto.steam_id = steamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.is_team = isTeam;
+                    dto.text = text;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    target_steam_id = null;
+                    is_team = false;
+                    text = null;
+                }
             }
 
-            public class PluginChatMessagePayload
+            public class PluginChatMessagePayload : Pool.IPooled
             {
                 public List<PluginChatMessageDto> messages;
+
+                public void LeavePool() => messages = Pool.Get<List<PluginChatMessageDto>>();
+                public void EnterPool() => Pool.FreeUnmanaged(ref messages);
             }
 
             public static StableRequest<object> SendChatMessages(PluginChatMessagePayload payload)
@@ -1648,7 +1668,7 @@ namespace Oxide.Plugins
 
         private class ChatWorker : RustAppWorker
         {
-            private List<CourtApi.PluginChatMessageDto> QueueMessages = new List<CourtApi.PluginChatMessageDto>();
+            private readonly List<CourtApi.PluginChatMessageDto> QueueMessages = new();
 
             private void Awake()
             {
@@ -1669,19 +1689,33 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginChatMessagePayload { messages = Pool.Get<List<CourtApi.PluginChatMessageDto>>() };
+                CourtApi.PluginChatMessagePayload payload = Pool.Get<CourtApi.PluginChatMessagePayload>();
                 payload.messages.AddRange(QueueMessages);
                 QueueMessages.Clear();
 
                 CourtApi.SendChatMessages(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.messages);
+                    Pool.Free(ref payload.messages, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     QueueMessages.AddRange(payload.messages);
-                    Pool.FreeUnmanaged(ref payload.messages);
+                    payload.messages.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < QueueMessages.Count; i++)
+                {
+                    CourtApi.PluginChatMessageDto? item = QueueMessages[i];
+                    Pool.Free(ref item);
+                }
+                QueueMessages.Clear();
             }
         }
 
@@ -2460,19 +2494,15 @@ namespace Oxide.Plugins
             }
         }
 
-        private void OnPlayerChat(BasePlayer player, string message, ConVar.Chat.ChatChannel channel)
+        private void OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
         {
-            if (channel is not ConVar.Chat.ChatChannel.Team and not ConVar.Chat.ChatChannel.Global and not ConVar.Chat.ChatChannel.Local)
-            {
+            if (channel is not Chat.ChatChannel.Team and not Chat.ChatChannel.Global and not Chat.ChatChannel.Local)
                 return;
-            }
 
-            _RustAppEngine?.ChatWorker?.SaveChatMessage(new CourtApi.PluginChatMessageDto
-            {
-                steam_id = player.UserIDString,
-                is_team = channel == ConVar.Chat.ChatChannel.Team,
-                text = message
-            });
+            ChatWorker? worker = _RustAppEngine?.ChatWorker;
+            if (worker == null) return;
+
+            worker.SaveChatMessage(CourtApi.PluginChatMessageDto.Create(player.UserIDString, message, channel == Chat.ChatChannel.Team));
         }
 
         #endregion
@@ -4067,14 +4097,10 @@ namespace Oxide.Plugins
 
         private void RA_DirectMessageHandler(string from, string to, string message)
         {
-            _RustAppEngine?.ChatWorker?.SaveChatMessage(new CourtApi.PluginChatMessageDto
-            {
-                steam_id = from,
-                target_steam_id = to,
-                is_team = false,
+            ChatWorker? worker = _RustAppEngine?.ChatWorker;
+            if (worker == null) return;
 
-                text = message
-            });
+            worker.SaveChatMessage(CourtApi.PluginChatMessageDto.Create(from, message, isTeam: false, targetSteamId: to));
         }
 
         private void RA_ReportSend(string initiator_steam_id, string target_steam_id, string reason, string message = "")
