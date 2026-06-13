@@ -2932,72 +2932,75 @@ namespace Oxide.Plugins
         #endregion
 
         #region Kills
-
+        
         private readonly struct HitRecord
         {
-            public readonly BasePlayer InitiatorPlayer;
+            public readonly string? InitiatorSteamId;
             public readonly string Weapon;
             public readonly float Distance;
             public readonly bool IsHeadshot;
-            public HitRecord(HitInfo info)
+
+            public HitRecord(HitInfo? info)
             {
                 if (info is null)
-                {
                     return;
-                }
 
-                InitiatorPlayer = info.InitiatorPlayer;
+                InitiatorSteamId = info.InitiatorPlayer != null ? info.InitiatorPlayer.UserIDString : null;
 
                 Distance = info.ProjectileDistance;
                 IsHeadshot = info.isHeadshot;
 
-                Weapon = GetName(info.Weapon) ?? GetName(info.WeaponPrefab) ?? "unknown";
+                Weapon = ResolveWeaponName(info);
             }
         }
 
-        private void OnPlayerWound(BasePlayer instance, HitInfo info)
+        private void OnPlayerWound(BasePlayer player, HitInfo? info)
         {
-            if (_RustAppEngine?.KillsWorker == null || info?.InitiatorPlayer is null || info.InitiatorPlayer == instance)
+            if (_RustAppEngine?.KillsWorker == null || !IsRealSteamId(player) || info?.InitiatorPlayer is null || info.InitiatorPlayer == player)
             {
                 return;
             }
 
             // Bombardir: We can't save HitInfo there as it's pooled and will be invalid after this function completes.
-            _RustAppEngine.KillsWorker.WoundedHits[instance.UserIDString] = new HitRecord(info);
+            _RustAppEngine.KillsWorker.WoundedHits[player.UserIDString] = new HitRecord(info);
         }
 
         private void OnPlayerRespawn(BasePlayer player)
         {
+            if (!IsRealSteamId(player))
+                return;
+            
             _RustAppEngine?.KillsWorker?.WoundedHits.Remove(player.UserIDString);
         }
 
-        void OnPlayerRecovered(BasePlayer player)
+        private void OnPlayerRecovered(BasePlayer player)
         {
+            if (!IsRealSteamId(player))
+                return;
+            
             _RustAppEngine?.KillsWorker?.WoundedHits.Remove(player.UserIDString);
         }
 
         private void OnPlayerDeath(BasePlayer player, HitInfo info)
         {
-            if (player is null)
-            {
+            if (!IsRealSteamId(player))
                 return;
-            }
 
             var hitRecord = GetRealInfo(player, info);
-            if (hitRecord.InitiatorPlayer is null || player == hitRecord.InitiatorPlayer)
+            var targetId = player.UserIDString;
+            if (hitRecord.InitiatorSteamId == null || hitRecord.InitiatorSteamId == targetId)
             {
                 return;
             }
 
             var playerUserId = player.userID.Get();
-            var targetId = player.UserIDString;
 
             NextFrame(() =>
             {
                 var log = GetCorrectCombatlog(playerUserId);
                 _RustAppEngine?.KillsWorker?.AddKill(new CourtApi.PluginKillEntryDto
                 {
-                    initiator_steam_id = hitRecord.InitiatorPlayer.UserIDString,
+                    initiator_steam_id = hitRecord.InitiatorSteamId,
                     target_steam_id = targetId,
                     distance = hitRecord.Distance,
                     game_time = Env.time.ToTimeSpan().ToShortString(),
@@ -3402,10 +3405,49 @@ namespace Oxide.Plugins
         #endregion
 
         #region Methods
-
-        private static string GetName(UnityEngine.Object obj)
+        
+        private static string ResolveWeaponName(HitInfo? info)
         {
-            return obj == null ? null : obj?.name;
+            if (info == null) return "unknown";
+
+            Item? item = info.Weapon != null ? info.Weapon.GetItem() : null;
+            string? itemShortname = item?.info?.shortname;
+            if (!string.IsNullOrEmpty(itemShortname))
+                return itemShortname!;
+
+            string? weaponPrefabShort = info.WeaponPrefab != null ? info.WeaponPrefab.ShortPrefabName : null;
+            if (!string.IsNullOrEmpty(weaponPrefabShort))
+                return StripWeaponSuffixes(weaponPrefabShort!);
+
+            if (info.ProjectilePrefab != null && !string.IsNullOrEmpty(info.ProjectilePrefab.name))
+                return StripWeaponSuffixes(info.ProjectilePrefab.name);
+
+            if (info.Initiator != null && !string.IsNullOrEmpty(info.Initiator.ShortPrefabName))
+                return StripWeaponSuffixes(info.Initiator.ShortPrefabName);
+
+            if (info.damageTypes != null)
+            {
+                DamageType dt = info.damageTypes.GetMajorityDamageType();
+                if (dt != DamageType.Generic)
+                    return dt.ToString().ToLowerInvariant();
+            }
+
+            return "unknown";
+        }
+        
+        private static string StripWeaponSuffixes(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+
+            const string SuffixEntity = ".entity";
+            const string SuffixDeployed = ".deployed";
+
+            if (name.EndsWith(SuffixDeployed, StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - SuffixDeployed.Length);
+            if (name.EndsWith(SuffixEntity, StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - SuffixEntity.Length);
+
+            return name;
         }
 
         private static List<CourtApi.CombatLogEventDto> GetCorrectCombatlog(ulong target)
@@ -4325,6 +4367,16 @@ namespace Oxide.Plugins
 
             return ipWithPort;
         }
+        
+        private const ulong SteamId64Base = 76561197960265728UL;
+
+        public static bool IsRealSteamId(ulong userId) => userId >= SteamId64Base;
+
+        public static bool IsRealSteamId(string steamId)
+            => !string.IsNullOrEmpty(steamId) && ulong.TryParse(steamId, out ulong id) && id >= SteamId64Base;
+
+        public static bool IsRealSteamId(BasePlayer player)
+            => player.userID >= SteamId64Base;
 
         private double CurrentTime() => DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
 
