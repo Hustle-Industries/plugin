@@ -2174,24 +2174,12 @@ namespace Oxide.Plugins
             public void AddPlayerMute(CourtApi.PlayerMuteDto playerMuteDto)
             {
                 var steamId = ulong.Parse(playerMuteDto.target_steam_id);
-
-                if (!PlayerMutes.ContainsKey(steamId))
-                {
-                    PlayerMutes.Add(steamId, playerMuteDto);
-                }
-
                 PlayerMutes[steamId] = playerMuteDto;
             }
 
             public void RemovePlayerMute(CourtApi.PlayerMuteDto playerMuteDto)
             {
                 var steamId = ulong.Parse(playerMuteDto.target_steam_id);
-
-                if (!PlayerMutes.ContainsKey(steamId))
-                {
-                    return;
-                }
-
                 PlayerMutes.Remove(steamId);
             }
 
@@ -2233,10 +2221,11 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (_RustAppEngine.ReportWorker.ReportCooldowns.ContainsKey(player.userID) && _RustAppEngine.ReportWorker.ReportCooldowns[player.userID] > CurrentTime())
+            var now = CurrentTime();
+            if (_RustAppEngine.ReportWorker.ReportCooldowns.TryGetValue(player.userID, out var cooldownUntil) && cooldownUntil > now)
             {
-                var msg = lang.GetMessage("Cooldown", this, player.UserIDString).Replace("%TIME%",
-                    $"{(_RustAppEngine.ReportWorker.ReportCooldowns[player.userID] - CurrentTime()).ToString("0")}");
+                var msg = lang.GetMessage("Cooldown", this, player.UserIDString)
+                    .Replace("%TIME%", $"{(cooldownUntil - now).ToString("0")}");
 
                 SoundToast(player, msg, SoundToastType.Error);
                 return;
@@ -3110,14 +3099,7 @@ namespace Oxide.Plugins
         {
             var data = raw.ToObject<QueueTaskAnnounceReportProcessedDto>();
 
-            if (!_CheckInfo.LastChecks.ContainsKey(data.suspect_id))
-            {
-                _CheckInfo.LastChecks.Add(data.suspect_id, _RustApp.CurrentTime());
-            }
-            else
-            {
-                _CheckInfo.LastChecks[data.suspect_id] = _RustApp.CurrentTime();
-            }
+            _CheckInfo.LastChecks[data.suspect_id] = _RustApp.CurrentTime();
 
             Interface.Oxide.CallHook("RustApp_OnPaidAnnounceClean", data.suspect_id, data.targets);
 
@@ -3626,7 +3608,8 @@ namespace Oxide.Plugins
 
             try
             {
-                bool was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+                bool was_checked = _CheckInfo.LastChecks.TryGetValue(target.UserIDString, out var lastCheck)
+                                   && CurrentTime() - lastCheck < _Settings.report_ui_show_check_in * 24 * 60 * 60;
                 if (was_checked)
                 {
                     container.Add(new CuiPanel
@@ -3834,15 +3817,13 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (!_RustAppEngine.ReportWorker.ReportCooldowns.ContainsKey(initiator.userID))
-            {
-                _RustAppEngine.ReportWorker.ReportCooldowns.Add(initiator.userID, 0);
-            }
+            var cooldowns = _RustAppEngine.ReportWorker.ReportCooldowns;
+            var now = CurrentTime();
 
-            if (_RustAppEngine.ReportWorker.ReportCooldowns[initiator.userID] > CurrentTime())
+            if (cooldowns.TryGetValue(initiator.userID, out var until) && until > now)
             {
-                var msg = lang.GetMessage("Cooldown", this, initiator.UserIDString).Replace("%TIME%",
-                    $"{(_RustAppEngine.ReportWorker.ReportCooldowns[initiator.userID] - CurrentTime()).ToString("0")}");
+                var msg = lang.GetMessage("Cooldown", this, initiator.UserIDString)
+                    .Replace("%TIME%", $"{(until - now).ToString("0")}");
 
                 SoundToast(initiator, msg, SoundToastType.Error);
                 return;
@@ -3854,12 +3835,7 @@ namespace Oxide.Plugins
 
             SoundToast(initiator, lang.GetMessage("Sent", this, initiator.UserIDString), SoundToastType.Info);
 
-            if (!_RustAppEngine.ReportWorker.ReportCooldowns.ContainsKey(initiator.userID))
-            {
-                _RustAppEngine.ReportWorker.ReportCooldowns.Add(initiator.userID, 0);
-            }
-
-            _RustAppEngine.ReportWorker.ReportCooldowns[initiator.userID] = CurrentTime() + _Settings.report_ui_cooldown;
+            cooldowns[initiator.userID] = now + _Settings.report_ui_cooldown;
         }
 
         private void OnPlayerConnectedNormalized(string steamId, string ip)
@@ -4284,7 +4260,8 @@ namespace Oxide.Plugins
                 return;
             }
 
-            bool was_checked = _CheckInfo.LastChecks.ContainsKey(target_steam_id) && CurrentTime() - _CheckInfo.LastChecks[target_steam_id] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+            bool was_checked = _CheckInfo.LastChecks.TryGetValue(target_steam_id, out var lastCheck)
+                               && CurrentTime() - lastCheck < _Settings.report_ui_show_check_in * 24 * 60 * 60;
             Interface.Oxide.CallHook("RustApp_OnPlayerReported", initiator_steam_id, target_steam_id, reason, message, was_checked);
 
             ReportWorker? worker = _RustAppEngine?.ReportWorker;
