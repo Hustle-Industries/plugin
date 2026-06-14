@@ -2704,6 +2704,11 @@ namespace Oxide.Plugins
             _steamIdStringCache.Clear();
 
             CourtApi.PluginServerDto.ResetCache();
+
+            // Reset Facepunch.Pool buckets owned by this plugin: nested DTOs (Oxide.Plugins.RustApp+CourtApi+...) and generics over them (List`1[[Oxide.Plugins.RustApp+...]]).
+            Pool.Clear(Name);
+            foreach (KeyValuePair<Type, Pool.IPoolCollection> kv in Pool.Directory.Where(kv => kv.Key.FullName != null && kv.Key.FullName.Contains(Name)).ToList())
+                Pool.Directory.TryRemove(kv.Key, out _);
         }
 
         private void OnNewSave(string saveName)
