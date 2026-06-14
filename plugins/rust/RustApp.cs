@@ -212,7 +212,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<PluginPairResponse> SendPairDetails(string code)
             {
-                PluginPairPayload payload = new PluginPairPayload();
+                PluginPairPayload payload = new();
                 payload.FillSnapshot();
                 return new StableRequest<PluginPairResponse>($"{BaseUrl}/plugin/pair?code={code}", RequestMethod.POST, payload);
             }
@@ -223,11 +223,11 @@ namespace Oxide.Plugins
 
             public class PluginStatePlayerMetaDto
             {
-                public Dictionary<string, string> tags = new Dictionary<string, string>();
-                public Dictionary<string, string> fields = new Dictionary<string, string>();
+                public readonly Dictionary<string, string> tags = new();
+                public readonly Dictionary<string, string> fields = new();
             }
 
-            public static Dictionary<ulong, PluginStatePlayerDto> players = new Dictionary<ulong, PluginStatePlayerDto>();
+            public static Dictionary<ulong, PluginStatePlayerDto> players = new();
 
             public class PluginStatePlayerDto
             {
@@ -302,7 +302,7 @@ namespace Oxide.Plugins
 
                 public string status;
 
-                public PluginStatePlayerMetaDto meta = new PluginStatePlayerMetaDto();
+                public PluginStatePlayerMetaDto meta = new();
                 public List<string> team;
                 
                 public void FreePooledFields()
@@ -665,7 +665,7 @@ namespace Oxide.Plugins
 
                 public static PluginPlayerAlertCustomDto Create(string msg, object? data, string? customIcon, string category, List<string>? customLinks)
                 {
-                    var dto = Pool.Get<PluginPlayerAlertCustomDto>();
+                    PluginPlayerAlertCustomDto? dto = Pool.Get<PluginPlayerAlertCustomDto>();
                     dto.msg = msg;
                     dto.data = data;
                     dto.custom_icon = customIcon;
@@ -957,11 +957,11 @@ namespace Oxide.Plugins
 
                 public string GetLeftTime()
                 {
-                    var leftMs = LeftSeconds();
+                    long leftMs = LeftSeconds();
                     if (leftMs <= 0) return RustApp._RustApp.lang.GetMessage("Time.Seconds", RustApp._RustApp, null).Replace("%COUNT%", "0");
 
-                    var time = TimeSpan.FromMilliseconds(leftMs);
-                    var parts = new List<string>();
+                    TimeSpan time = TimeSpan.FromMilliseconds(leftMs);
+                    List<string> parts = new();
 
                     if (time.Days > 0)
                         parts.Add(RustApp._RustApp.lang.GetMessage("Time.Days", RustApp._RustApp, null).Replace("%COUNT%", time.Days.ToString()));
@@ -977,7 +977,7 @@ namespace Oxide.Plugins
 
                 public string GetUnmuteDate()
                 {
-                    var date = DateTimeOffset.FromUnixTimeMilliseconds(GetExpiredAt());
+                    DateTimeOffset date = DateTimeOffset.FromUnixTimeMilliseconds(GetExpiredAt());
 
                     return $"{date.DateTime.ToShortDateString()} {date.DateTime.ToShortTimeString()}";
                 }
@@ -1115,7 +1115,7 @@ namespace Oxide.Plugins
 
         private static class BanApi
         {
-            private static readonly string BaseUrl = "https://ban.rustapp.io";
+            private const string BaseUrl = "https://ban.rustapp.io";
 
             #region BanGetBatch
 
@@ -1355,7 +1355,7 @@ namespace Oxide.Plugins
             {
                 SetupHeaders();
 
-                AuthWorker = this.gameObject.AddComponent<AuthWorker>();
+                AuthWorker = gameObject.AddComponent<AuthWorker>();
 
                 AuthWorker.OnAuthSuccess += () =>
                 {
@@ -1387,7 +1387,7 @@ namespace Oxide.Plugins
 
             private void CreateSubWorkers()
             {
-                ChildObjectToWorkers = this.gameObject.CreateChild();
+                ChildObjectToWorkers = gameObject.CreateChild();
 
                 StateWorker = ChildObjectToWorkers.AddComponent<StateWorker>();
                 CheckWorker = ChildObjectToWorkers.AddComponent<CheckWorker>();
@@ -1409,7 +1409,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                UnityEngine.Object.Destroy(ChildObjectToWorkers);
+                Destroy(ChildObjectToWorkers);
             }
         }
 
@@ -1567,9 +1567,19 @@ namespace Oxide.Plugins
                         return;
                     }
 
-                    Action saveData = () =>
+                    if (_RustAppEngine?.StateWorker != null)
+                        _RustAppEngine?.StateWorker?.SendUpdate(SaveData);
+                    else
+                        SaveData();
+                    
+                    return;
+
+                    void SaveData()
                     {
-                        MetaInfo.write(new MetaInfo { Value = data.token });
+                        MetaInfo.write(new MetaInfo
+                        {
+                            Value = data.token
+                        });
 
                         _RustApp.timer.Once(1f, () => _RustAppEngine?.AuthWorker?.CheckAuthStatus());
 
@@ -1579,15 +1589,6 @@ namespace Oxide.Plugins
                         Log("Pairing completed, reloading...");
 
                         Destroy(this);
-                    };
-
-                    if (_RustAppEngine?.StateWorker != null)
-                    {
-                        _RustAppEngine?.StateWorker?.SendUpdate(() => saveData());
-                    }
-                    else
-                    {
-                        saveData();
                     }
                 },
                 (err) =>
@@ -1689,26 +1690,16 @@ namespace Oxide.Plugins
 
         private class CheckWorker : RustAppWorker
         {
-            private Dictionary<string, bool> ShowedNoticyCache = new Dictionary<string, bool>();
+            private readonly Dictionary<string, bool> ShowedNoticyCache = new();
 
-            public bool IsNoticeActive(string steamId)
-            {
-                if (!ShowedNoticyCache.TryGetValue(steamId, out var value))
-                {
-                    return false;
-                }
-
-                return value;
-            }
+            public bool IsNoticeActive(string steamId) => ShowedNoticyCache.GetValueOrDefault(steamId, false);
 
             public void SetNoticeActive(string steamId, bool value)
             {
-                BasePlayer player = null;
+                BasePlayer? player = null;
 
-                if (ulong.TryParse(steamId, out var userid))
-                {
+                if (ulong.TryParse(steamId, out ulong userid))
                     player = BasePlayer.FindByID(userid);
-                }
 
                 if (player != null)
                 {
@@ -1741,16 +1732,14 @@ namespace Oxide.Plugins
                 }
             }
 
-            public void OnDestroy()
+            public new void OnDestroy()
             {
                 base.OnDestroy();
 
-                foreach (var check in ShowedNoticyCache.ToList())
+                foreach (KeyValuePair<string, bool> check in ShowedNoticyCache.ToList())
                 {
-                    if (check.Value == false)
-                    {
+                    if (!check.Value)
                         continue;
-                    }
 
                     SetNoticeActive(check.Key, false);
                 }
@@ -1952,7 +1941,7 @@ namespace Oxide.Plugins
                         {
                             for (int i = 0; i < data.entries.Count; i++)
                             {
-                                var e = data.entries[i];
+                                BanApi.BanGetBatchEntryResponseDto? e = data.entries[i];
                                 if (e?.steam_id != null) entriesByPid[e.steam_id] = e;
                             }
                         }
@@ -1960,7 +1949,7 @@ namespace Oxide.Plugins
                         for (int i = 0; i < payload.players.Count; i++)
                         {
                             BanApi.BanGetBatchEntryPayloadDto? originalPlayer = payload.players[i];
-                            BanApi.BanDto active = null;
+                            BanApi.BanDto? active = null;
                             if (entriesByPid.TryGetValue(originalPlayer.steam_id, out BanApi.BanGetBatchEntryResponseDto? entry) && entry.bans != null)
                             {
                                 for (int j = 0; j < entry.bans.Count; j++)
@@ -2010,7 +1999,7 @@ namespace Oxide.Plugins
 
             public void ReactOnDirectBan(string steamId, BanApi.BanDto ban)
             {
-                var format = "";
+                string? format = "";
 
                 if (ban.sync_project_id != 0)
                 {
@@ -2027,11 +2016,11 @@ namespace Oxide.Plugins
                       : _RustApp.lang.GetMessage("System.Ban.Temp.Kick", _RustApp, steamId);
                 }
 
-                var time = new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                string time = new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                   .AddMilliseconds(ban.expired_at + 3 * 60 * 60 * 1_000)
                   .ToString("dd.MM.yyyy HH:mm");
 
-                var finalText = format
+                string finalText = format
                   .Replace("%REASON%", ban.reason)
                   .Replace("%TIME%", time);
 
@@ -2213,9 +2202,9 @@ namespace Oxide.Plugins
 
         private class SignageWorker : RustAppWorker
         {
-            private List<string> DestroyedSignagesQueue = new List<string>();
+            private readonly List<string> DestroyedSignagesQueue = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -2246,7 +2235,7 @@ namespace Oxide.Plugins
                 }
                 catch
                 {
-
+                    // ignored
                 }
             }
 
@@ -2282,7 +2271,7 @@ namespace Oxide.Plugins
 
         private class SleepingBagWorker : RustAppWorker
         {
-            public List<CourtApi.PluginSleepingBagDto> SleepingBags = new();
+            private readonly List<CourtApi.PluginSleepingBagDto> SleepingBags = new();
 
             private new void Awake()
             {
@@ -2337,7 +2326,7 @@ namespace Oxide.Plugins
         private class KillsWorker : RustAppWorker
         {
             public readonly Dictionary<string, HitRecord> WoundedHits = new();
-            public readonly List<CourtApi.PluginKillEntryDto> KillsQueue = new();
+            private readonly List<CourtApi.PluginKillEntryDto> KillsQueue = new();
 
             private new void Awake()
             {
@@ -2391,9 +2380,9 @@ namespace Oxide.Plugins
 
         private class PlayerMuteWorker : RustAppWorker
         {
-            public Dictionary<ulong, CourtApi.PlayerMuteDto> PlayerMutes = new Dictionary<ulong, CourtApi.PlayerMuteDto>();
+            private readonly Dictionary<ulong, CourtApi.PlayerMuteDto> PlayerMutes = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -2402,37 +2391,29 @@ namespace Oxide.Plugins
 
             private void CycleUpdateMutes()
             {
-                var request = CourtApi.PlayerMuteGetActive();
+                StableRequest<CourtApi.PlayerMuteDtoIn> request = CourtApi.PlayerMuteGetActive();
 
                 request.Execute((data) =>
                 {
                     PlayerMutes.Clear();
-                    data?.data?.ForEach(v => AddPlayerMute(v));
+                    data?.data?.ForEach(AddPlayerMute);
                 },
                 (_) => { });
             }
 
             public void AddPlayerMute(CourtApi.PlayerMuteDto playerMuteDto)
             {
-                var steamId = ulong.Parse(playerMuteDto.target_steam_id);
+                ulong steamId = ulong.Parse(playerMuteDto.target_steam_id);
                 PlayerMutes[steamId] = playerMuteDto;
             }
 
             public void RemovePlayerMute(CourtApi.PlayerMuteDto playerMuteDto)
             {
-                var steamId = ulong.Parse(playerMuteDto.target_steam_id);
+                ulong steamId = ulong.Parse(playerMuteDto.target_steam_id);
                 PlayerMutes.Remove(steamId);
             }
 
-            public CourtApi.PlayerMuteDto? GetMute(ulong steamId)
-            {
-                if (PlayerMutes.TryGetValue(steamId, out var mute))
-                {
-                    return mute;
-                }
-
-                return null;
-            }
+            public CourtApi.PlayerMuteDto? GetMute(ulong steamId) => PlayerMutes.GetValueOrDefault(steamId);
         }
 
         #endregion
