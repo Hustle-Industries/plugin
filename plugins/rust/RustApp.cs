@@ -460,17 +460,56 @@ namespace Oxide.Plugins
                 public static readonly string custom_api = "custom_api";
             }
 
-            public class PluginPlayerAlertDto
+            public class PluginPlayerAlertDto : Pool.IPooled
             {
                 public string type;
                 public object meta;
+
+                public static PluginPlayerAlertDto Create(string type, object meta)
+                {
+                    PluginPlayerAlertDto? dto = Pool.Get<PluginPlayerAlertDto>();
+                    dto.type = type;
+                    dto.meta = meta;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    type = null;
+                   
+                    if (meta is Pool.IPooled)
+                    {
+                        object? m = meta;
+                        Pool.FreeUnsafe(ref m);
+                    }
+                    meta = null;
+                }
             }
 
-            public class PluginPlayerAlertJoinWithIpBanMeta
+            public class PluginPlayerAlertJoinWithIpBanMeta : Pool.IPooled
             {
                 public string steam_id;
                 public string ip;
                 public int ban_id;
+
+                public static PluginPlayerAlertJoinWithIpBanMeta Create(string steamId, string ip, int banId)
+                {
+                    PluginPlayerAlertJoinWithIpBanMeta? dto = Pool.Get<PluginPlayerAlertJoinWithIpBanMeta>();
+                    dto.steam_id = steamId;
+                    dto.ip = ip;
+                    dto.ban_id = banId;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    ip = null;
+                    ban_id = 0;
+                }
             }
 
             public class PluginPlayerAlertDugUpStashMeta
@@ -481,24 +520,60 @@ namespace Oxide.Plugins
                 public string square;
             }
 
-            public static StableRequest<object> CreatePlayerAlerts(List<PluginPlayerAlertDto> alerts)
+            public class PluginPlayerAlertsBatchPayload : Pool.IPooled
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/alerts", RequestMethod.POST, new { alerts });
+                public List<PluginPlayerAlertDto> alerts;
+
+                public void LeavePool() => alerts = Pool.Get<List<PluginPlayerAlertDto>>();
+
+                public void EnterPool()
+                {
+                    if (alerts != null) Pool.FreeUnmanaged(ref alerts);
+                }
+            }
+
+            public static StableRequest<object> CreatePlayerAlerts(PluginPlayerAlertsBatchPayload payload)
+            {
+                return new StableRequest<object>($"{BaseUrl}/plugin/alerts", RequestMethod.POST, payload);
             }
 
             #endregion
 
             #region PlayerAlertCustom
 
-            public class PluginPlayerAlertCustomDto
+            public class PluginPlayerAlertCustomDto : Pool.IPooled
             {
                 public string msg;
                 public object data;
 
                 public string custom_icon;
-                public bool hide_in_table = false;
+                public bool hide_in_table;
                 public string category;
                 public List<string> custom_links;
+
+                public static PluginPlayerAlertCustomDto Create(string msg, object? data, string? customIcon, string category, List<string>? customLinks)
+                {
+                    var dto = Pool.Get<PluginPlayerAlertCustomDto>();
+                    dto.msg = msg;
+                    dto.data = data;
+                    dto.custom_icon = customIcon;
+                    dto.hide_in_table = false;
+                    dto.category = category;
+                    dto.custom_links = customLinks;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    msg = null;
+                    data = null;
+                    custom_icon = null;
+                    hide_in_table = false;
+                    category = null;
+                    custom_links = null;
+                }
             }
 
             public class PluginPlayerAlertCustomAlertMeta
@@ -1882,16 +1957,12 @@ namespace Oxide.Plugins
             {
                 _RustApp.CloseConnection(steamId, _RustApp.lang.GetMessage("System.Ban.Ip.Kick", _RustApp, steamId));
 
-                _RustAppEngine?.PlayerAlertsWorker?.SavePlayerAlert(new CourtApi.PluginPlayerAlertDto
-                {
-                    type = CourtApi.PluginPlayerAlertType.join_with_ip_ban,
-                    meta = new CourtApi.PluginPlayerAlertJoinWithIpBanMeta
-                    {
-                        steam_id = steamId,
-                        ip = ban.ban_ip,
-                        ban_id = ban.id
-                    }
-                });
+                PlayerAlertsWorker? worker = _RustAppEngine?.PlayerAlertsWorker;
+                if (worker == null) return;
+
+                CourtApi.PluginPlayerAlertJoinWithIpBanMeta meta = CourtApi.PluginPlayerAlertJoinWithIpBanMeta.Create(steamId, ban.ban_ip, ban.id);
+                worker.SavePlayerAlert(CourtApi.PluginPlayerAlertDto.Create(
+                    CourtApi.PluginPlayerAlertType.join_with_ip_ban, meta));
             }
         }
 
@@ -2004,19 +2075,16 @@ namespace Oxide.Plugins
 
         private class PlayerAlertsWorker : RustAppWorker
         {
-            public List<CourtApi.PluginPlayerAlertDto> PlayerAlertQueue = new List<CourtApi.PluginPlayerAlertDto>();
+            private readonly List<CourtApi.PluginPlayerAlertDto> PlayerAlertQueue = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
                 InvokeRepeating(nameof(CycleSendPlayerAlerts), 0f, 5f);
             }
 
-            public void SavePlayerAlert(CourtApi.PluginPlayerAlertDto alert)
-            {
-                PlayerAlertQueue.Add(alert);
-            }
+            public void SavePlayerAlert(CourtApi.PluginPlayerAlertDto alert) => PlayerAlertQueue.Add(alert);
 
             private void CycleSendPlayerAlerts()
             {
@@ -2025,19 +2093,33 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var alerts = Pool.Get<List<CourtApi.PluginPlayerAlertDto>>();
-                alerts.AddRange(PlayerAlertQueue);
+                CourtApi.PluginPlayerAlertsBatchPayload? payload = Pool.Get<CourtApi.PluginPlayerAlertsBatchPayload>();
+                payload.alerts.AddRange(PlayerAlertQueue);
                 PlayerAlertQueue.Clear();
 
-                CourtApi.CreatePlayerAlerts(alerts).Execute(() =>
+                CourtApi.CreatePlayerAlerts(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref alerts);
+                    Pool.Free(ref payload.alerts, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
-                    PlayerAlertQueue.AddRange(alerts);
-                    Pool.FreeUnmanaged(ref alerts);
+                    PlayerAlertQueue.AddRange(payload.alerts);
+                    payload.alerts.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < PlayerAlertQueue.Count; i++)
+                {
+                    CourtApi.PluginPlayerAlertDto? item = PlayerAlertQueue[i];
+                    Pool.Free(ref item);
+                }
+                PlayerAlertQueue.Clear();
             }
         }
 
@@ -3980,37 +4062,26 @@ namespace Oxide.Plugins
             (err) => Error($"Failed to unban {steamId}. Reason: {err}"));
         }
 
-        private void CreatePlayerAlertsCustom(Plugin plugin, string message, object data = null, object meta = null)
+        private void CreatePlayerAlertsCustom(Plugin plugin, string message, object? data = null, object? meta = null)
         {
-            CourtApi.PluginPlayerAlertCustomAlertMeta json = new CourtApi.PluginPlayerAlertCustomAlertMeta();
-
-            try
-            {
-                if (meta != null)
-                {
-                    json = JsonConvert.DeserializeObject<CourtApi.PluginPlayerAlertCustomAlertMeta>(JsonConvert.SerializeObject(meta ?? new CourtApi.PluginPlayerAlertCustomAlertMeta()));
-                }
-            }
-            catch
+            CourtApi.PluginPlayerAlertCustomAlertMeta? json = meta as CourtApi.PluginPlayerAlertCustomAlertMeta;
+            if (meta != null && json == null)
             {
                 Error("Wrong CustomAlertMeta params, default will be used!");
             }
 
-            CourtApi.CreatePlayerAlertsCustom(new CourtApi.PluginPlayerAlertCustomDto
-            {
-                msg = message,
-                data = data,
+            CourtApi.PluginPlayerAlertCustomDto? payload = CourtApi.PluginPlayerAlertCustomDto.Create(
+                message,
+                data,
+                customIcon: json?.custom_icon,
+                category: $"{plugin.Name} • {(json?.name ?? "")}",
+                customLinks: json?.custom_links);
 
-                custom_icon = json.custom_icon,
-                hide_in_table = false,
-                category = $"{plugin.Name} • {json.name}",
-                custom_links = json.custom_links
-            }).Execute(
-              (error) =>
-              {
-                  Debug($"Failed to send custom alert: {error}");
-              }
+            CourtApi.CreatePlayerAlertsCustom(payload).Execute(
+                (error) => Debug($"Failed to send custom alert: {error}")
             );
+
+            Pool.Free(ref payload);
         }
 
         #endregion
