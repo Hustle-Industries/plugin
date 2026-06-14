@@ -248,22 +248,21 @@ namespace Oxide.Plugins
                     payload.seconds_connected = (int)connection.GetSecondsConnected();
                     payload.language = _RustApp.lang.GetLanguage(payload.steam_id);
                     payload.status = status;
-                    try { payload.meta = CollectPlayerMeta(payload.steam_id, payload.meta); } catch { }
+                    try { payload.meta = CollectPlayerMeta(payload.steam_id, payload.meta); } catch (Exception ex) { Debug(ex.ToString()); }
 
-                    payload.team.Clear();
+                    payload.team ??= Pool.Get<List<string>>();
 
-                    var newTeam = RelationshipManager.ServerInstance.FindPlayersTeam(userid);
+                    RelationshipManager.PlayerTeam? newTeam = RelationshipManager.ServerInstance.FindPlayersTeam(userid);
                     if (newTeam == null)
                     {
                         return payload;
                     }
 
-                    foreach (var member in newTeam.members)
+                    for (int index = 0; index < newTeam.members.Count; index++)
                     {
+                        ulong member = newTeam.members[index];
                         if (member != userid)
-                        {
                             payload.team.Add(member.ToString());
-                        }
                     }
 
                     return payload;
@@ -271,7 +270,7 @@ namespace Oxide.Plugins
 
                 public static PluginStatePlayerDto FromPlayer(BasePlayer player)
                 {
-                    var payload = FromConnection(player.Connection, "active");
+                    PluginStatePlayerDto payload = FromConnection(player.Connection, "active");
 
                     payload.position = player.transform.position.ToString();
                     payload.rotation = player.eyes.rotation.ToString();
@@ -1663,12 +1662,12 @@ namespace Oxide.Plugins
             {
                 foreach (BasePlayer? player in BasePlayer.activePlayerList)
                 {
-                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromPlayer(player)); } catch { }
+                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromPlayer(player)); } catch (Exception ex) { Debug($"FromPlayer failed: {ex}"); }
                 }
 
                 foreach (Connection? connection in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "joining")); } catch { }
+                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "joining")); } catch (Exception ex) { Debug($"FromConnection(joining) failed: {ex}"); }
                 }
 
                 foreach (Connection? connection in ServerMgr.Instance.connectionQueue.queue)
@@ -1677,7 +1676,7 @@ namespace Oxide.Plugins
                     {
                         continue;
                     }
-                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "queued")); } catch { }
+                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "queued")); } catch (Exception ex) { Debug($"FromConnection(queued) failed: {ex}"); }
                 }
             }
 
@@ -1871,17 +1870,17 @@ namespace Oxide.Plugins
             {
                 foreach (BasePlayer? player in BasePlayer.activePlayerList)
                 {
-                    try { CheckBans(player); } catch { }
+                    try { CheckBans(player); } catch (Exception ex) { Debug($"CheckBans(player) failed: {ex}"); }
                 }
 
                 foreach (Connection? queued in ServerMgr.Instance.connectionQueue.queue)
                 {
-                    try { CheckBans(GetSteamIdString(queued.userid), IPAddressWithoutPort(queued.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(queued.userid), IPAddressWithoutPort(queued.ipaddress)); } catch (Exception ex) { Debug($"CheckBans(queued) failed: {ex}"); }
                 }
 
                 foreach (Connection? loading in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { CheckBans(GetSteamIdString(loading.userid), IPAddressWithoutPort(loading.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(loading.userid), IPAddressWithoutPort(loading.ipaddress)); } catch (Exception ex) { Debug($"CheckBans(loading) failed: {ex}"); }
                 }
             }
 
