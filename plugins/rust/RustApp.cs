@@ -98,26 +98,44 @@ namespace Oxide.Plugins
                 
                 public void FillSnapshot()
                 {
-                    name = ConVar.Server.hostname;
-                    hostname = ConVar.Server.hostname;
-                    level = SteamServer.MapName ?? ConVar.Server.level;
-                    level_url = ConVar.Server.levelurl;
-                    level_image_url = MapUploader.ImageUrl;
-                    world_size = ConVar.Server.worldsize;
-                    description = ConVar.Server.description + " " + ConVar.Server.motd;
-                    branch = ConVar.Server.branch;
-                    avatar_big = ConVar.Server.logoimage;
-                    avatar_url = ConVar.Server.logoimage;
-                    banner_url = ConVar.Server.headerimage;
+                    // Статика — кэшируем все поля что не меняются за uptime
+                    name = _cachedName ??= ConVar.Server.hostname;
+                    hostname = _cachedHostname ??= ConVar.Server.hostname;
+                    level = _cachedLevel ??= (SteamServer.MapName ?? ConVar.Server.level);
+                    level_url = _cachedLevelUrl ??= ConVar.Server.levelurl;
+                    level_image_url = _cachedLevelImageUrl ??= MapUploader.ImageUrl;
+                    world_size = _cachedWorldSize ??= ConVar.Server.worldsize;
+                    description = _cachedDescription ??= (ConVar.Server.description + " " + ConVar.Server.motd);
+                    branch = _cachedBranch ??= ConVar.Server.branch;
+                    avatar_big = _cachedAvatarBig ??= ConVar.Server.logoimage;
+                    avatar_url = _cachedAvatarUrl ??= ConVar.Server.logoimage;
+                    banner_url = _cachedBannerUrl ??= ConVar.Server.headerimage;
+                    version = _cachedVersion ??= _RustApp.Version.ToString();
+                    protocol = _cachedProtocol ??= Protocol.printable.ToString();
+                    port = _cachedPort ??= ConVar.Server.port;
+
+                    // Динамика — каждый цикл свежее значение.
                     online = BasePlayer.activePlayerList.Count + ServerMgr.Instance.connectionQueue.queue.Count + ServerMgr.Instance.connectionQueue.joining.Count;
                     slots = ConVar.Server.maxplayers;
                     reserved = ServerMgr.Instance.connectionQueue.ReservedCount;
-                    version = _RustApp.Version.ToString();
-                    protocol = Protocol.printable.ToString();
                     performance = _RustApp.TotalHookTime.ToString();
-                    port = ConVar.Server.port;
                     connected = _RustAppEngine?.AuthWorker.IsAuthed ?? false;
                 }
+                
+                private static string _cachedName;
+                private static string _cachedHostname;
+                private static string _cachedLevel;
+                private static string _cachedLevelUrl;
+                private static string _cachedLevelImageUrl;
+                private static int? _cachedWorldSize;
+                private static string _cachedDescription;
+                private static string _cachedBranch;
+                private static string _cachedAvatarBig;
+                private static string _cachedAvatarUrl;
+                private static string _cachedBannerUrl;
+                private static string _cachedVersion;
+                private static string _cachedProtocol;
+                private static int? _cachedPort;
 
                 public virtual void LeavePool() { }
 
@@ -1296,7 +1314,7 @@ namespace Oxide.Plugins
             public PlayerMuteWorker? PlayerMuteWorker;
             public SleepingBagWorker? SleepingBagWorker;
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
