@@ -69,34 +69,80 @@ namespace Oxide.Plugins
         {
             #region Shared
 
-            public class PluginServerDto
+            public class PluginServerDto : Pool.IPooled
             {
-                public string name = ConVar.Server.hostname;
-                public string hostname = ConVar.Server.hostname;
+                public string name;
+                public string hostname;
 
-                public string level = SteamServer.MapName ?? ConVar.Server.level;
-                public string level_url = ConVar.Server.levelurl;
-                // Thanks for the information, DezLife
-                public string level_image_url = MapUploader.ImageUrl;
-                public int world_size = ConVar.Server.worldsize;
-                public string description = ConVar.Server.description + " " + ConVar.Server.motd;
-                public string branch = ConVar.Server.branch;
+                public string level;
+                public string level_url;
+                public string level_image_url;
+                public int world_size;
+                public string description;
+                public string branch;
 
-                public string avatar_big = ConVar.Server.logoimage;
-                public string avatar_url = ConVar.Server.logoimage;
-                public string banner_url = ConVar.Server.headerimage;
+                public string avatar_big;
+                public string avatar_url;
+                public string banner_url;
 
-                public int online = BasePlayer.activePlayerList.Count + ServerMgr.Instance.connectionQueue.queue.Count + ServerMgr.Instance.connectionQueue.joining.Count;
-                public int slots = ConVar.Server.maxplayers;
-                public int reserved = ServerMgr.Instance.connectionQueue.ReservedCount;
+                public int online;
+                public int slots;
+                public int reserved;
 
-                public string version = _RustApp.Version.ToString();
-                public string protocol = Protocol.printable.ToString();
-                public string performance = _RustApp.TotalHookTime.ToString();
+                public string version;
+                public string protocol;
+                public string performance;
 
-                public int port = ConVar.Server.port;
+                public int port;
+                public bool connected;
+                
+                public void FillSnapshot()
+                {
+                    name = ConVar.Server.hostname;
+                    hostname = ConVar.Server.hostname;
+                    level = SteamServer.MapName ?? ConVar.Server.level;
+                    level_url = ConVar.Server.levelurl;
+                    level_image_url = MapUploader.ImageUrl;
+                    world_size = ConVar.Server.worldsize;
+                    description = ConVar.Server.description + " " + ConVar.Server.motd;
+                    branch = ConVar.Server.branch;
+                    avatar_big = ConVar.Server.logoimage;
+                    avatar_url = ConVar.Server.logoimage;
+                    banner_url = ConVar.Server.headerimage;
+                    online = BasePlayer.activePlayerList.Count + ServerMgr.Instance.connectionQueue.queue.Count + ServerMgr.Instance.connectionQueue.joining.Count;
+                    slots = ConVar.Server.maxplayers;
+                    reserved = ServerMgr.Instance.connectionQueue.ReservedCount;
+                    version = _RustApp.Version.ToString();
+                    protocol = Protocol.printable.ToString();
+                    performance = _RustApp.TotalHookTime.ToString();
+                    port = ConVar.Server.port;
+                    connected = _RustAppEngine?.AuthWorker.IsAuthed ?? false;
+                }
 
-                public bool connected = _RustAppEngine?.AuthWorker.IsAuthed ?? false;
+                public virtual void LeavePool() { }
+
+                public virtual void EnterPool()
+                {
+                    name = null;
+                    hostname = null;
+                    level = null;
+                    level_url = null;
+                    level_image_url = null;
+                    world_size = 0;
+                    description = null;
+                    branch = null;
+                    avatar_big = null;
+                    avatar_url = null;
+                    banner_url = null;
+                    online = 0;
+                    slots = 0;
+                    reserved = 0;
+                    version = null;
+                    protocol = null;
+                    performance = null;
+                    port = 0;
+                    connected = false;
+                }
             }
 
             #endregion
@@ -221,11 +267,28 @@ namespace Oxide.Plugins
 
             public class PluginStateUpdatePayload : PluginServerDto
             {
-                public PluginServerDto server_info = new PluginServerDto();
+                public PluginServerDto server_info;
 
                 public List<PluginStatePlayerDto> players;
                 public Dictionary<string, string> disconnected;
                 public Dictionary<string, string> team_changes;
+
+                public override void LeavePool()
+                {
+                    base.LeavePool();
+                    server_info = Pool.Get<PluginServerDto>();
+                }
+
+                public override void EnterPool()
+                {
+                    base.EnterPool();
+
+                    if (server_info != null) Pool.Free(ref server_info);
+                    
+                    if (players != null) Pool.FreeUnmanaged(ref players);
+                    if (disconnected != null) Pool.FreeUnmanaged(ref disconnected);
+                    if (team_changes != null) Pool.FreeUnmanaged(ref team_changes);
+                }
             }
 
             public static StableRequest<object> SendStateUpdate(PluginStateUpdatePayload data)
@@ -1513,27 +1576,26 @@ namespace Oxide.Plugins
 
             public void SendUpdate(Action? onFinished = null)
             {
-                var players = Pool.Get<List<CourtApi.PluginStatePlayerDto>>();
-                CollectPlayers(players);
 
-                var disconnected = Pool.Get<Dictionary<string, string>>();
-                ResurrectDictionary(DisconnectReasons, disconnected);
+                CourtApi.PluginStateUpdatePayload? payload = Pool.Get<CourtApi.PluginStateUpdatePayload>();
+                payload.FillSnapshot();
+                payload.server_info.FillSnapshot();
 
-                var teamChanges = Pool.Get<Dictionary<string, string>>();
-                ResurrectDictionary(TeamChanges, teamChanges);
+                payload.players = Pool.Get<List<CourtApi.PluginStatePlayerDto>>();
+                CollectPlayers(payload.players);
+
+                payload.disconnected = Pool.Get<Dictionary<string, string>>();
+                ResurrectDictionary(DisconnectReasons, payload.disconnected);
+
+                payload.team_changes = Pool.Get<Dictionary<string, string>>();
+                ResurrectDictionary(TeamChanges, payload.team_changes);
 
                 DisconnectReasons.Clear();
                 TeamChanges.Clear();
 
-                CourtApi.SendStateUpdate(new CourtApi.PluginStateUpdatePayload
+                CourtApi.SendStateUpdate(payload).Execute(() =>
                 {
-                    players = players,
-                    disconnected = disconnected,
-                    team_changes = teamChanges
-                }).Execute(() =>
-                {
-                    Pool.FreeUnmanaged(ref disconnected);
-                    Pool.FreeUnmanaged(ref teamChanges);
+                    Pool.Free(ref payload);
                     Trace("State was sent successfull");
                     onFinished?.Invoke();
                 },
@@ -1541,13 +1603,11 @@ namespace Oxide.Plugins
                 {
                     onFinished?.Invoke();
                     Debug($"State sent error: {err}");
-                    ResurrectDictionary(disconnected, DisconnectReasons);
-                    Pool.FreeUnmanaged(ref disconnected);
-                    ResurrectDictionary(teamChanges, TeamChanges);
-                    Pool.FreeUnmanaged(ref teamChanges);
-                });
 
-                Pool.FreeUnmanaged(ref players);
+                    ResurrectDictionary(payload.disconnected, DisconnectReasons);
+                    ResurrectDictionary(payload.team_changes, TeamChanges);
+                    Pool.Free(ref payload);
+                });
             }
 
             private void CollectPlayers(List<CourtApi.PluginStatePlayerDto> playerStateDtos)
