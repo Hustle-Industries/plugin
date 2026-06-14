@@ -850,10 +850,10 @@ namespace Oxide.Plugins
 
                 private void Init(float time, CombatLog.Event ev, Dictionary<ulong, string>? idCache)
                 {
-                    if (ev.attacker == "player")
+                    if (ev.attacker is "player" or "you")
                         attacker_steam_id = ResolveSteamId(ev.attacker_id, idCache);
 
-                    if (ev.target == "player")
+                    if (ev.target is "player" or "you")
                         target_steam_id = ResolveSteamId(ev.target_id, idCache);
 
                     this.time = time - ev.time;
