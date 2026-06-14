@@ -1608,10 +1608,10 @@ namespace Oxide.Plugins
 
         private class StateWorker : RustAppWorker
         {
-            public Dictionary<string, string> DisconnectReasons = new Dictionary<string, string>();
-            public Dictionary<string, string> TeamChanges = new Dictionary<string, string>();
+            public readonly Dictionary<string, string> DisconnectReasons = new();
+            public readonly Dictionary<string, string> TeamChanges = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1661,17 +1661,17 @@ namespace Oxide.Plugins
 
             private void CollectPlayers(List<CourtApi.PluginStatePlayerDto> playerStateDtos)
             {
-                foreach (var player in BasePlayer.activePlayerList)
+                foreach (BasePlayer? player in BasePlayer.activePlayerList)
                 {
                     try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromPlayer(player)); } catch { }
                 }
 
-                foreach (var connection in ServerMgr.Instance.connectionQueue.joining)
+                foreach (Connection? connection in ServerMgr.Instance.connectionQueue.joining)
                 {
                     try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "joining")); } catch { }
                 }
 
-                foreach (var connection in ServerMgr.Instance.connectionQueue.queue)
+                foreach (Connection? connection in ServerMgr.Instance.connectionQueue.queue)
                 {
                     if (connection == null)
                     {
@@ -1681,30 +1681,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            private void CollectFakeDisconnects(Dictionary<string, string> disconnect)
-            {
-                foreach (var player in BasePlayer.activePlayerList)
-                {
-                    try { disconnect.Add(player.UserIDString, "plugin-unload"); } catch { }
-                }
-
-                foreach (var connection in ServerMgr.Instance.connectionQueue.joining)
-                {
-                    try { disconnect.Add(GetSteamIdString(connection.userid), "plugin-unload"); } catch { }
-                }
-
-                foreach (var connection in ServerMgr.Instance.connectionQueue.queue)
-                {
-                    if (connection == null)
-                    {
-                        continue;
-                    }
-
-                    try { disconnect.Add(GetSteamIdString(connection.userid), "plugin-unload"); } catch { }
-                }
-            }
-
-            public void OnDestroy()
+            public new void OnDestroy()
             {
                 base.OnDestroy();
             }
