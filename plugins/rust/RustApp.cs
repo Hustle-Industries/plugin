@@ -262,7 +262,10 @@ namespace Oxide.Plugins
                 public PluginStatePlayerMetaDto meta = new PluginStatePlayerMetaDto();
                 public List<string> team;
                 
-                public void FreePooledFields() => Pool.FreeUnmanaged(ref team);
+                public void FreePooledFields()
+                {
+                    if (team != null) Pool.FreeUnmanaged(ref team);
+                }
             }
 
             public class PluginStateUpdatePayload : PluginServerDto
@@ -374,7 +377,7 @@ namespace Oxide.Plugins
                     target_steam_id = null;
                     reason = null;
                     message = null;
-                    Pool.FreeUnmanaged(ref sub_targets_steam_ids);
+                    if (sub_targets_steam_ids != null) Pool.FreeUnmanaged(ref sub_targets_steam_ids);
                 }
             }
 
@@ -541,11 +544,14 @@ namespace Oxide.Plugins
                 public void EnterPool()
                 {
                     type = null;
-                   
-                    if (meta is Pool.IPooled)
+
+                    switch (meta)
                     {
-                        object? m = meta;
-                        Pool.FreeUnsafe(ref m);
+                        case PluginPlayerAlertJoinWithIpBanMeta join:
+                            PluginPlayerAlertJoinWithIpBanMeta? j = join;
+                            Pool.Free(ref j);
+                            break;
+                        // Новые IPooled meta-типы добавлять сюда!!
                     }
                     meta = null;
                 }
@@ -1977,6 +1983,7 @@ namespace Oxide.Plugins
 
                 foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
                 {
+                    if (entry == null) continue;
                     BanApi.BanGetBatchEntryPayloadDto? e = entry;
                     Pool.Free(ref e);
                 }
@@ -2073,6 +2080,7 @@ namespace Oxide.Plugins
                 for (int i = 0; i < QueueMessages.Count; i++)
                 {
                     CourtApi.PluginChatMessageDto? item = QueueMessages[i];
+                    if (item == null) continue;
                     Pool.Free(ref item);
                 }
                 QueueMessages.Clear();
@@ -2127,6 +2135,7 @@ namespace Oxide.Plugins
                 for (int i = 0; i < QueueReportSend.Count; i++)
                 {
                     CourtApi.PluginReportDto item = QueueReportSend[i];
+                    if (item == null) continue;
                     Pool.Free(ref item);
                 }
                 QueueReportSend.Clear();
@@ -2177,6 +2186,7 @@ namespace Oxide.Plugins
                 for (int i = 0; i < PlayerAlertQueue.Count; i++)
                 {
                     CourtApi.PluginPlayerAlertDto? item = PlayerAlertQueue[i];
+                    if (item == null) continue;
                     Pool.Free(ref item);
                 }
                 PlayerAlertQueue.Clear();
@@ -2299,6 +2309,7 @@ namespace Oxide.Plugins
                 for (int i = 0; i < SleepingBags.Count; i++)
                 {
                     CourtApi.PluginSleepingBagDto? item = SleepingBags[i];
+                    if (item == null) continue;
                     Pool.Free(ref item);
                 }
                 SleepingBags.Clear();
@@ -2353,6 +2364,7 @@ namespace Oxide.Plugins
                 for (int i = 0; i < KillsQueue.Count; i++)
                 {
                     CourtApi.PluginKillEntryDto? item = KillsQueue[i];
+                    if (item == null) continue;
                     Pool.Free(ref item);
                 }
                 KillsQueue.Clear();
@@ -5030,11 +5042,16 @@ namespace Oxide.Plugins
 
             private byte[] GetImageBytes(Bitmap image)
             {
-                MemoryStream stream = Facepunch.Pool.Get<MemoryStream>();
-                image.Save(stream, ImageFormat.Png);
-                byte[] bytes = stream.ToArray();
-                Facepunch.Pool.FreeUnmanaged(ref stream);
-                return bytes;
+                MemoryStream? stream = Pool.Get<MemoryStream>();
+                try
+                {
+                    image.Save(stream, ImageFormat.Png);
+                    return stream.ToArray();
+                }
+                finally
+                {
+                    Pool.FreeUnmanaged(ref stream);
+                }
             }
         }
 
