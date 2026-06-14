@@ -637,58 +637,43 @@ namespace Oxide.Plugins
 
                 public bool ad;
 
-                public CombatLogEventDto(float time, CombatLog.Event ev)
+                public CombatLogEventDto(float time, CombatLog.Event ev, Dictionary<ulong, string>? idCache = null)
                 {
                     if (ev.attacker == "player")
-                    {
-                        var attacker = BaseNetworkable.serverEntities.Find(new NetworkableId(ev.attacker_id)) as BasePlayer; ;
-                        this.attacker_steam_id = attacker?.UserIDString ?? "";
-                    }
+                        attacker_steam_id = ResolveSteamId(ev.attacker_id, idCache);
 
                     if (ev.target == "player")
-                    {
-                        var target = BaseNetworkable.serverEntities.Find(new NetworkableId(ev.target_id)) as BasePlayer;
-                        this.target_steam_id = target?.UserIDString ?? "";
-                    }
+                        target_steam_id = ResolveSteamId(ev.target_id, idCache);
 
                     this.time = time - ev.time;
-                    this.attacker = ev.attacker;
-                    this.target = ev.target;
-                    this.weapon = ev.weapon;
-                    this.ammo = ev.ammo;
-                    this.bone = ev.bone;
-                    this.distance = (float)Math.Round(ev.distance, 2);
-                    this.hp_old = (float)Math.Round(ev.health_old, 2);
-                    this.hp_new = (float)Math.Round(ev.health_new, 2);
-                    this.info = ev.info;
-                    this.proj_hits = ev.proj_hits;
-                    this.proj_travel = ev.proj_travel;
-
-                    this.desync = ev.desync;
-
-                    this.pi = ev.proj_integrity;
-                    this.pm = ev.proj_mismatch;
-                    this.ad = ev.attacker_dead;
+                    attacker = ev.attacker;
+                    target = ev.target;
+                    weapon = ev.weapon;
+                    ammo = ev.ammo;
+                    bone = ev.bone;
+                    distance = (float)Math.Round(ev.distance, 2);
+                    hp_old = (float)Math.Round(ev.health_old, 2);
+                    hp_new = (float)Math.Round(ev.health_new, 2);
+                    info = ev.info;
+                    proj_hits = ev.proj_hits;
+                    proj_travel = ev.proj_travel;
+                    desync = ev.desync;
+                    pi = ev.proj_integrity;
+                    pm = ev.proj_mismatch;
+                    ad = ev.attacker_dead;
                 }
-
-                public string getInitiator()
+                
+                private static string ResolveSteamId(ulong netId, Dictionary<ulong, string>? idCache)
                 {
-                    if (this.attacker != "player")
-                    {
-                        return this.attacker;
-                    }
+                    if (idCache != null && idCache.TryGetValue(netId, out string? cached))
+                        return cached;
 
-                    return this.attacker_steam_id;
-                }
+                    string? sid = BaseNetworkable.serverEntities.TryGetEntity<BasePlayer>(new NetworkableId(netId), out BasePlayer? player)
+                        ? player.UserIDString
+                        : "";
 
-                public string getTarget()
-                {
-                    if (this.target != "player")
-                    {
-                        return this.target;
-                    }
-
-                    return this.target_steam_id;
+                    if (idCache != null) idCache[netId] = sid;
+                    return sid;
                 }
             }
 
@@ -3736,50 +3721,55 @@ namespace Oxide.Plugins
             const int THRESHOLD_STREAK = 20;
             const int THRESHOLD_MAX_LIMIT = 30;
 
-            var allCombatlogs = CombatLog.Get(target);
+            Queue<CombatLog.Event>? allCombatlogs = CombatLog.Get(target);
 
             if (allCombatlogs == null || allCombatlogs.Count == 0)
-            {
                 return null;
-            }
+            
 
-            var logsList = Pool.Get<List<CombatLog.Event>>();
+            List<CombatLog.Event>? logsList = Pool.Get<List<CombatLog.Event>>();
+            Dictionary<ulong, string>? idCache = Pool.Get<Dictionary<ulong, string>>();
 
-            logsList.AddRange(allCombatlogs);
-
-            var logsLastIndex = logsList.Count - 1;
-            var killLog = logsList[logsLastIndex];
-
-            var container = new List<CourtApi.CombatLogEventDto>(8)
+            try
             {
-                new(killLog.time, killLog)
-            };
+                logsList.AddRange(allCombatlogs);
 
-            for (var i = logsLastIndex - 1; i >= 0; i--)
-            {
-                var ev = logsList[i];
+                int logsLastIndex = logsList.Count - 1;
+                CombatLog.Event killLog = logsList[logsLastIndex];
 
-                if (ev.target != "player" && ev.target != "you")
+                List<CourtApi.CombatLogEventDto> container = new(8)
                 {
-                    continue;
+                    new CourtApi.CombatLogEventDto(killLog.time, killLog, idCache)
+                };
+
+                for (int i = logsLastIndex - 1; i >= 0; i--)
+                {
+                    CombatLog.Event ev = logsList[i];
+
+                    if (ev.target != "player" && ev.target != "you")
+                        continue;
+
+                    if (ev.info == "killed")
+                        break;
+
+                    float timeSincePreviousEvent = ev.time - logsList[i + 1].time;
+                    if (timeSincePreviousEvent > THRESHOLD_STREAK)
+                        break;
+
+                    float timeSinceEvent = killLog.time - ev.time;
+                    if (timeSinceEvent > THRESHOLD_MAX_LIMIT)
+                        break;
+
+                    container.Add(new CourtApi.CombatLogEventDto(killLog.time, ev, idCache));
                 }
 
-                if (ev.info == "killed")
-                    break;
-
-                var timeSincePreviousEvent = ev.time - logsList[i + 1].time;
-                if (timeSincePreviousEvent > THRESHOLD_STREAK)
-                    break;
-
-                var timeSinceEvent = killLog.time - ev.time;
-                if (timeSinceEvent > THRESHOLD_MAX_LIMIT)
-                    break;
-
-                container.Add(new CourtApi.CombatLogEventDto(killLog.time, ev));
+                return container;
             }
-
-            Pool.FreeUnmanaged(ref logsList);
-            return container;
+            finally
+            {
+                Pool.FreeUnmanaged(ref logsList);
+                Pool.FreeUnmanaged(ref idCache);
+            }
         }
 
         private HitRecord GetRealInfo(BasePlayer player, HitInfo info)
