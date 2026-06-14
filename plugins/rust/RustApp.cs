@@ -648,7 +648,7 @@ namespace Oxide.Plugins
                     this.time = time - ev.time;
                     attacker = ev.attacker;
                     target = ev.target;
-                    weapon = ev.weapon;
+                    weapon = NormalizeName(ev.weapon);
                     ammo = ev.ammo;
                     bone = ev.bone;
                     distance = (float)Math.Round(ev.distance, 2);
@@ -674,6 +674,28 @@ namespace Oxide.Plugins
 
                     if (idCache != null) idCache[netId] = sid;
                     return sid;
+                }
+                
+                private static readonly Dictionary<string, string> _normalizedWeaponNameCache = new();
+
+                private static string NormalizeName(string fullName)
+                {
+                    const string Suffix = ".entity.prefab";
+
+                    if (string.IsNullOrEmpty(fullName) || fullName == "N/A"
+                        || !fullName.EndsWith(Suffix, StringComparison.Ordinal))
+                        return fullName;
+
+                    if (_normalizedWeaponNameCache.TryGetValue(fullName, out string? normalized))
+                        return normalized;
+
+                    int lastSlash = fullName.LastIndexOf('/');
+                    int start = lastSlash + 1;
+                    int len = fullName.Length - start - Suffix.Length;
+
+                    normalized = fullName.Substring(start, len);
+                    _normalizedWeaponNameCache[fullName] = normalized;
+                    return normalized;
                 }
             }
 
