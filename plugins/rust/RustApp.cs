@@ -54,6 +54,7 @@ namespace Oxide.Plugins
         private static (string name, string value)[] _ApiHeaders = Array.Empty<(string, string)>();
 
         private static readonly object _false = false; // avoid boxing for hooks
+        private static readonly object _true = true;   // avoid boxing for hooks
 
         private string _UiCommandName;
         private string _UiSearchCommand;
@@ -3043,7 +3044,7 @@ namespace Oxide.Plugins
 
         private object RustApp_InternalQueue_HealthCheck(JObject raw)
         {
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3072,7 +3073,7 @@ namespace Oxide.Plugins
                     var target = BasePlayer.Find(mute.data.target_steam_id);
                     if (target == null)
                     {
-                        return true;
+                        return _true;
                     }
 
                     foreach (var player in BasePlayer.activePlayerList)
@@ -3087,7 +3088,7 @@ namespace Oxide.Plugins
                 _RustAppEngine?.PlayerMuteWorker?.RemovePlayerMute(mute.data);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3116,7 +3117,7 @@ namespace Oxide.Plugins
             {
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3147,7 +3148,7 @@ namespace Oxide.Plugins
 
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var player in BasePlayer.activePlayerList)
@@ -3157,7 +3158,7 @@ namespace Oxide.Plugins
                 _RustApp.SendMessage(player, msg);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3174,10 +3175,10 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskNoticeStateGetDto>();
             if (_RustAppEngine?.CheckWorker == null)
             {
-                return false;
+                return _false;
             }
 
-            return _RustAppEngine?.CheckWorker?.IsNoticeActive(data.steam_id) ?? false;
+            return (_RustAppEngine?.CheckWorker?.IsNoticeActive(data.steam_id) ?? false) ? _true : _false;
         }
 
         #endregion
@@ -3195,12 +3196,12 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskNoticeStateSetDto>();
             if (_RustAppEngine?.CheckWorker == null)
             {
-                return false;
+                return _false;
             }
 
             _RustAppEngine?.CheckWorker?.SetNoticeActive(data.steam_id, data.value);
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3253,7 +3254,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3319,17 +3320,17 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskDeleteEntityDto>();
             if (!ulong.TryParse(data.net_id, out var netIdParsed))
             {
-                return false;
+                return _false;
             }
 
             var ent = BaseNetworkable.serverEntities.Find(new NetworkableId(netIdParsed));
             if (ent == null)
             {
-                return false;
+                return _false;
             }
 
             ent.Kill();
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3362,7 +3363,7 @@ namespace Oxide.Plugins
 
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in data.targets)
@@ -3381,7 +3382,7 @@ namespace Oxide.Plugins
                 _RustApp.SoundToast(player, msg, SoundToastType.Error);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3415,7 +3416,7 @@ namespace Oxide.Plugins
 
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in data.targets)
@@ -3433,7 +3434,7 @@ namespace Oxide.Plugins
                 _RustApp.SoundToast(player, msg, SoundToastType.Info);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3451,7 +3452,7 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskCheckStartedDto>();
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in BasePlayer.activePlayerList)
@@ -3459,7 +3460,7 @@ namespace Oxide.Plugins
                 SendMessage(check, lang.GetMessage("Check.Started", this, check.UserIDString).Replace("%NAME%", permission.GetUserData(data.steam_id).LastSeenNickname));
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -3482,7 +3483,7 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskCheckFinishedDto>();
             if (!data.broadcast || !data.is_clear)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in BasePlayer.activePlayerList)
@@ -3490,7 +3491,7 @@ namespace Oxide.Plugins
                 SendMessage(check, lang.GetMessage("Check.FinishedClear", this, check.UserIDString).Replace("%NAME%", permission.GetUserData(data.steam_id).LastSeenNickname));
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
