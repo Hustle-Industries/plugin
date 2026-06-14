@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Reference: ZString
+
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
@@ -8,7 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using ConVar;
-using Facepunch;
+using Cysharp.Text;
 using JetBrains.Annotations;
 using Network;
 using Newtonsoft.Json;
@@ -52,6 +54,9 @@ namespace Oxide.Plugins
         private static (string name, string value)[] _ApiHeaders = Array.Empty<(string, string)>();
 
         private static readonly object _false = false; // avoid boxing for hooks
+
+        private string _UiCommandName;
+        private string _UiSearchCommand;
 
         #endregion
 
@@ -2577,6 +2582,52 @@ namespace Oxide.Plugins
 
             BanDelete(steamId);
         }
+        
+        private void OnUiCommand(ConsoleSystem.Arg args)
+        {
+            BasePlayer player = args.Player();
+            if (player == null) return;
+
+            switch (args.GetString(0))
+            {
+                case "page":
+                    DrawReportInterface(player, args.GetInt(1), args.GetString(2), redraw: true);
+                    PlayEffect(player, FxButtonUnpress);
+                    break;
+
+                case "search":
+                    string typed;
+                    if (args.HasArgs(2))
+                    {
+                        StringBuilder sb = Pool.Get<StringBuilder>();
+                        try
+                        {
+                            for (int i = 1; i < args.Args.Length; i++)
+                            {
+                                if (i > 1) sb.Append(' ');
+                                sb.Append(args.GetString(i));
+                            }
+                            typed = sb.ToString();
+                        }
+                        finally
+                        {
+                            Pool.FreeUnmanaged(ref sb);
+                        }
+                    }
+                    else typed = "";
+                    
+                    DrawReportInterface(player, 0, typed, redraw: true);
+                    break;
+
+                case "show":
+                    DrawPlayerReportReasons(player, args.GetString(1), args.GetInt(2), args.GetInt(3));
+                    break;
+
+                case "send":
+                    SendReport(player, args.GetString(1), args.GetString(2));
+                    break;
+            }
+        }
 
         #endregion
 
@@ -2590,6 +2641,9 @@ namespace Oxide.Plugins
             _CheckInfo = CheckInfo.Read();
 
             CourtApi.players = new Dictionary<ulong, CourtApi.PluginStatePlayerDto>();
+
+            _UiCommandName = "x" + Guid.NewGuid().ToString("N");
+            _UiSearchCommand = _UiCommandName + " search ";
         }
 
         private void OnServerInitialized()
@@ -3596,16 +3650,15 @@ namespace Oxide.Plugins
                     Image = { Color = "0 0 1 0" }
                 }, ReportLayer + ".C", ReportLayer + ".R");
 
+                int nextPageNum = hasNextPage ? page + 1 : page;
+                int prevPageNum = hasPrevPage ? page - 1 : 0;
+
                 container.Add(new CuiButton()
                 {
                     RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.5", OffsetMin = "0 0", OffsetMax = "0 -4" },
                     Button = {
                       Color = hasNextPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
-                      Command = UICommand((player, args, input) => {
-                        DrawReportInterface(player, args.page, args.search, true);
-
-                        PlayEffect(player, FxButtonUnpress);
-                      }, new { search = search, page = hasNextPage ? page + 1 : page }, "nextPageGo")
+                      Command = ZString.Format("{0} page {1} {2}", _UiCommandName, nextPageNum, search)
                     },
                     Text = { Text = "↓", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasNextPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
                 }, ReportLayer + ".R", ReportLayer + ".RD");
@@ -3615,11 +3668,7 @@ namespace Oxide.Plugins
                     RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = "0 4", OffsetMax = "0 0" },
                     Button = {
                       Color = hasPrevPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
-                      Command = UICommand((player, args, input) => {
-                        DrawReportInterface(player, args.page, args.search, true);
-
-                        PlayEffect(player, FxButtonUnpress);
-                      }, new { search = search, page = hasPrevPage ? page - 1 : 0 }, "prevPageGo")
+                      Command = ZString.Format("{0} page {1} {2}", _UiCommandName, prevPageNum, search)
                     },
                     Text = { Text = "↑", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasPrevPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
                 }, ReportLayer + ".R", ReportLayer + ".RU");
@@ -3630,10 +3679,7 @@ namespace Oxide.Plugins
                     Image = { Color = "0.816 0.776 0.741 0.2" }
                 }, ReportLayer + ".C", ReportLayer + ".S");
 
-                string searchCommand = UICommand((player, args, input) =>
-                {
-                    DrawReportInterface(player, 0, input, true);
-                }, new { }, "searchForPlayer");
+                string searchCommand = _UiSearchCommand;
 
                 container.Add(new CuiElement
                 {
@@ -3734,13 +3780,7 @@ namespace Oxide.Plugins
                                 Text = { Text = targetId, Align = TextAnchor.LowerLeft, Font = "robotocondensed-regular.ttf", FontSize = 10, Color = "0.816 0.776 0.741 0.5" }
                             }, ReportLayer + $".{targetId}");
 
-                            string min = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}";
-                            string max = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}";
-
-                            string showPlayerCommand = UICommand((player, args, input) =>
-                            {
-                                DrawPlayerReportReasons(player, args.steam_id, args.min, args.max, args.left);
-                            }, new { steam_id = targetId, min, max, left = x >= 3 }, "showPlayerReportReasons");
+                            string showPlayerCommand = ZString.Format("{0} show {1} {2} {3}", _UiCommandName, targetId, x, y);
 
                             container.Add(new CuiButton()
                             {
@@ -3785,7 +3825,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private void DrawPlayerReportReasons(BasePlayer player, string targetId, string min, string max, bool leftAlign)
+        private void DrawPlayerReportReasons(BasePlayer player, string targetId, int gridX, int gridY)
         {
             BasePlayer target = BasePlayer.Find(targetId) ?? BasePlayer.FindSleeping(targetId);
             if (target == null)
@@ -3795,6 +3835,14 @@ namespace Oxide.Plugins
             }
 
             PlayEffect(player, FxButtonUnpress);
+
+            const int ColumnCount = 6;
+            const int LineMargin = 8;
+            const float size = (float)(700 - LineMargin * ColumnCount) / ColumnCount;
+
+            string min = $"{gridX * size + LineMargin * gridX} -{(gridY + 1) * size + LineMargin * gridY}";
+            string max = $"{(gridX + 1) * size + LineMargin * gridX} -{gridY * size + LineMargin * gridY}";
+            bool leftAlign = gridX >= 3;
 
             CuiElementContainer container = new CuiElementContainer();
             CuiHelper.DestroyUi(player, ReportLayer + $".T");
@@ -3879,10 +3927,7 @@ namespace Oxide.Plugins
                     int offXMin = (20 + (i * 5)) + i * 80;
                     int offXMax = 20 + (i * 5) + (i + 1) * 80;
 
-                    string sendReportCommand = UICommand((player, args, input) =>
-                    {
-                        SendReport(player, args.target_id, args.reason);
-                    }, new { target_id = target.UserIDString, reason = _Settings.report_ui_reasons[i] }, "sendReportToPlayer");
+                    string sendReportCommand = ZString.Format("{0} send {1} {2}", _UiCommandName, target.UserIDString, _Settings.report_ui_reasons[i]);
 
                     container.Add(new CuiButton()
                     {
@@ -4524,6 +4569,7 @@ namespace Oxide.Plugins
             _Settings.report_ui_commands.ForEach(v => cmd.AddChatCommand(v, this, nameof(CmdChatReportInterface)));
 
             cmd.AddChatCommand(_Settings.check_contact_command, this, nameof(CmdSendContact));
+            cmd.AddConsoleCommand(_UiCommandName, this, nameof(OnUiCommand));
         }
 
         private bool CheckRequiredPlugins()
@@ -4874,99 +4920,6 @@ namespace Oxide.Plugins
         }
 
         private double CurrentTime() => DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
-
-        #region UI Commands references
-
-        #region Variables
-
-        private Dictionary<string, string> UICommands = new Dictionary<string, string>();
-
-        #endregion
-
-        #region Methods
-
-        private string UICommand<T>(Action<BasePlayer, T, string> callback, T arg, string commandName)
-        {
-            string argument = $" {JsonConvert.SerializeObject(arg)}~INPUT_LIMITTER~";
-
-            if (UICommands.TryGetValue(commandName, out string? command))
-            {
-                return command + argument;
-            }
-
-            string? commandUuid = CuiHelper.GetGuid();
-
-            UICommands.Add(commandName, commandUuid);
-
-            const string Sep = "~INPUT_LIMITTER~";
-
-            cmd.AddConsoleCommand(commandUuid, this, (args) =>
-            {
-                var player = args.Player();
-
-                try
-                {
-                    string str = "";
-                    string input = "";
-                    
-                    StringView[]? rawArgs = args?.Args;
-                    if (rawArgs is { Length: > 0 })
-                    {
-                        str = string.Join(" ", rawArgs);
-                    }
-                    
-                    int sepIdx = str.IndexOf(Sep, StringComparison.Ordinal);
-                    if (sepIdx >= 0)
-                    {
-                        try
-                        {
-                            input = str.Substring(sepIdx + Sep.Length).Trim();
-                            str = str.Substring(0, sepIdx);
-                        }
-                        catch (Exception exc4)
-                        {
-                            Error($"Failed to parse UICommand arguments (input): {args?.FullString} {str} {input}");
-                            Error(exc4.ToString());
-                        }
-                    }
-
-                    try
-                    {
-                        str = str.Replace("\\r ", "").Replace("\r ", "").Replace("\r", "");
-
-                        T? restoredArgument = JsonConvert.DeserializeObject<T>(str);
-
-                        try
-                        {
-                            callback(player, restoredArgument, input ?? "");
-                        }
-                        catch (Exception exc3)
-                        {
-                            Error($"Failed to parse UICommand arguments (callback): {args?.FullString} {str} {input}");
-                            Error(exc3.ToString());
-                        }
-                    }
-                    catch (Exception exc2)
-                    {
-                        Error($"Failed to parse UICommand arguments (deserialize): {args?.FullString} {str} {input}");
-                        Error(exc2.ToString());
-                    }
-                }
-                catch (Exception exc)
-                {
-                    Error($"Failed to parse UICommand arguments: {args?.FullString}");
-                    Error(exc.ToString());
-                }
-
-                return true;
-            });
-
-            return commandUuid + argument;
-        }
-
-        #endregion
-
-        #endregion
 
         #endregion
 
