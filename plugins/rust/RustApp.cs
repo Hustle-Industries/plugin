@@ -190,12 +190,30 @@ namespace Oxide.Plugins
             #endregion
 
             private const string BaseUrl = "https://court.rustapp.io";
+            
+            private const string PairUriPrefix = BaseUrl + "/plugin/pair?code=";
+            private static readonly Uri UriServerInfo = new(BaseUrl + "/plugin/");
+            private static readonly Uri UriState = new(BaseUrl + "/plugin/state");
+            private static readonly Uri UriChat = new(BaseUrl + "/plugin/chat");
+            private static readonly Uri UriReports = new(BaseUrl + "/plugin/reports");
+            private static readonly Uri UriContact = new(BaseUrl + "/plugin/contact");
+            private static readonly Uri UriWipe = new(BaseUrl + "/plugin/wipe");
+            private static readonly Uri UriSleepingBag = new(BaseUrl + "/plugin/sleeping-bag");
+            private static readonly Uri UriBan = new(BaseUrl + "/plugin/ban");
+            private static readonly Uri UriUnban = new(BaseUrl + "/plugin/unban");
+            private static readonly Uri UriAlerts = new(BaseUrl + "/plugin/alerts");
+            private static readonly Uri UriCustomAlert = new(BaseUrl + "/plugin/custom-alert");
+            private static readonly Uri UriSignage = new(BaseUrl + "/plugin/signage");
+            private static readonly Uri UriKills = new(BaseUrl + "/plugin/kills");
+            private static readonly Uri UriPlayerMuteGetActive = new(BaseUrl + "/plugin/player-mute/get-active");
+            private static readonly Uri UriPlayerMuteCreate = new(BaseUrl + "/plugin/player-mute/mute-player");
+            private static readonly Uri UriPlayerMuteDelete = new(BaseUrl + "/plugin/player-mute/unmute-player");
 
             #region GetServerInfo
 
             public static StableRequest<object> GetServerInfo()
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/", RequestMethod.GET, null);
+                return new StableRequest<object>(UriServerInfo, RequestMethod.GET, null);
             }
 
             #endregion
@@ -214,7 +232,8 @@ namespace Oxide.Plugins
             {
                 PluginPairPayload payload = new();
                 payload.FillSnapshot();
-                return new StableRequest<PluginPairResponse>($"{BaseUrl}/plugin/pair?code={code}", RequestMethod.POST, payload);
+                
+                return new StableRequest<PluginPairResponse>(ZString.Concat(PairUriPrefix, code), RequestMethod.POST, payload);
             }
 
             #endregion
@@ -339,7 +358,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendStateUpdate(PluginStateUpdatePayload data)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/state", RequestMethod.PUT, data);
+                return new StableRequest<object>(UriState, RequestMethod.PUT, data);
             }
 
             #endregion
@@ -387,7 +406,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendChatMessages(PluginChatMessagePayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/chat", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriChat, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -437,7 +456,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendReports(PluginReportBatchPayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/reports", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriReports, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -446,7 +465,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendContact(string steamId, string contact)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/contact", RequestMethod.POST, new { steam_id = steamId, message = contact });
+                return new StableRequest<object>(UriContact, RequestMethod.POST, new { steam_id = steamId, message = contact });
             }
 
             #endregion
@@ -455,7 +474,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendWipe()
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/wipe", RequestMethod.POST, null);
+                return new StableRequest<object>(UriWipe, RequestMethod.POST, null);
             }
 
             #endregion
@@ -504,7 +523,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SleepingBagCreate(PluginSleepingBagBatchDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/sleeping-bag", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriSleepingBag, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -547,7 +566,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> BanCreate(PluginBanCreatePayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/ban", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriBan, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -556,7 +575,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> BanDelete(string steamId)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/unban", RequestMethod.POST, new { target_steam_id = steamId });
+                return new StableRequest<object>(UriUnban, RequestMethod.POST, new { target_steam_id = steamId });
             }
 
             #endregion
@@ -646,7 +665,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> CreatePlayerAlerts(PluginPlayerAlertsBatchPayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/alerts", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriAlerts, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -697,7 +716,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> CreatePlayerAlertsCustom(PluginPlayerAlertCustomDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/custom-alert", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriCustomAlert, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -740,7 +759,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendSignage(PluginSignageCreateDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/signage", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriSignage, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -761,7 +780,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendSignageDestroyed(SignageDestroyedDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/signage", RequestMethod.DELETE, payload);
+                return new StableRequest<object>(UriSignage, RequestMethod.DELETE, payload);
             }
 
             #endregion
@@ -938,7 +957,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendKills(PluginKillsDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/kills", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriKills, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -997,7 +1016,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<PlayerMuteDtoIn> PlayerMuteGetActive()
             {
-                return new StableRequest<PlayerMuteDtoIn>($"{BaseUrl}/plugin/player-mute/get-active", RequestMethod.GET, null);
+                return new StableRequest<PlayerMuteDtoIn>(UriPlayerMuteGetActive, RequestMethod.GET, null);
             }
 
             #endregion
@@ -1040,7 +1059,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> PlayerMuteCreate(PlayerMuteCreateDto data)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/player-mute/mute-player", RequestMethod.POST, data);
+                return new StableRequest<object>(UriPlayerMuteCreate, RequestMethod.POST, data);
             }
 
             #endregion
@@ -1064,7 +1083,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> PlayerMuteDelete(PlayerMuteDeleteDto data)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/player-mute/unmute-player", RequestMethod.POST, data);
+                return new StableRequest<object>(UriPlayerMuteDelete, RequestMethod.POST, data);
             }
 
             #endregion
@@ -1091,11 +1110,13 @@ namespace Oxide.Plugins
 
             private const string BaseUrl = "https://queue.rustapp.io";
 
+            private static readonly Uri UriQueueRoot = new(BaseUrl + "/");
+
             #region GetQueueTasks
 
             public static StableRequest<List<QueueTaskResponse>> GetQueueTasks()
             {
-                return new StableRequest<List<QueueTaskResponse>>($"{BaseUrl}/", RequestMethod.GET, null);
+                return new StableRequest<List<QueueTaskResponse>>(UriQueueRoot, RequestMethod.GET, null);
             }
 
             #endregion
@@ -1109,7 +1130,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> ProcessQueueTasks(QueueTaskResponsePayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/", RequestMethod.PUT, payload);
+                return new StableRequest<object>(UriQueueRoot, RequestMethod.PUT, payload);
             }
 
             #endregion
@@ -1118,6 +1139,8 @@ namespace Oxide.Plugins
         private static class BanApi
         {
             private const string BaseUrl = "https://ban.rustapp.io";
+
+            private static readonly Uri UriBanGetBatchV2 = new(BaseUrl + "/plugin/v2");
 
             #region BanGetBatch
 
@@ -1183,7 +1206,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<BanGetBatchResponse> BanGetBatch(BanGetBatchPayload payload)
             {
-                return new StableRequest<BanGetBatchResponse>($"{BaseUrl}/plugin/v2", RequestMethod.POST, payload);
+                return new StableRequest<BanGetBatchResponse>(UriBanGetBatchV2, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -4352,11 +4375,11 @@ namespace Oxide.Plugins
 
         public class StableRequest<T> where T : class
         {
-            private string url;
+            private Uri url;
             private string method;
             private object data;
 
-            public StableRequest(string url, RequestMethod requestMethod, object? data)
+            public StableRequest(Uri url, RequestMethod requestMethod, object? data)
             {
                 method = requestMethod switch
                 {
@@ -4370,6 +4393,9 @@ namespace Oxide.Plugins
                 this.url = url;
                 this.data = data;
             }
+
+            public StableRequest(string url, RequestMethod requestMethod, object? data)
+                : this(new Uri(url), requestMethod, data) { }
 
             public void Execute()
             {
