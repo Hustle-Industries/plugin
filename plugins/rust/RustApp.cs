@@ -581,63 +581,87 @@ namespace Oxide.Plugins
 
             #region SendKills
 
-            public class PluginKillsDto
+            public class PluginKillsDto : Pool.IPooled
             {
                 public List<PluginKillEntryDto> kills;
+
+                public void LeavePool() => kills = Pool.Get<List<PluginKillEntryDto>>();
+
+                public void EnterPool()
+                {
+                    if (kills != null) Pool.FreeUnmanaged(ref kills);
+                }
             }
 
-            public class PluginKillEntryDto
+            public class PluginKillEntryDto : Pool.IPooled
             {
                 public string initiator_steam_id;
                 public string target_steam_id;
                 public string game_time;
                 public float distance;
                 public string weapon;
-
                 public bool is_headshot;
-
                 public List<CombatLogEventDto> hit_history;
+
+                public static PluginKillEntryDto Create(string initiatorSteamId, string targetSteamId, string gameTime,
+                    float distance, string weapon, bool isHeadshot, List<CombatLogEventDto> hitHistory)
+                {
+                    PluginKillEntryDto? dto = Pool.Get<PluginKillEntryDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.game_time = gameTime;
+                    dto.distance = distance;
+                    dto.weapon = weapon;
+                    dto.is_headshot = isHeadshot;
+                    dto.hit_history = hitHistory;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    game_time = null;
+                    distance = 0f;
+                    weapon = null;
+                    is_headshot = false;
+                    
+                    if (hit_history != null)
+                        Pool.Free(ref hit_history, freeElements: true);
+                }
             }
 
-            public class CombatLogEventDto
+            public class CombatLogEventDto : Pool.IPooled
             {
                 public float time;
-
                 public string attacker_steam_id;
-
                 public string target_steam_id;
-
                 public string attacker;
-
                 public string target;
-
                 public string weapon;
-
                 public string ammo;
-
                 public string bone;
-
                 public float distance;
-
                 public float hp_old;
-
                 public float hp_new;
-
                 public string info;
-
                 public int proj_hits;
-
                 public float pi;
-
                 public float proj_travel;
-
                 public float pm;
-
                 public int desync;
-
                 public bool ad;
 
-                public CombatLogEventDto(float time, CombatLog.Event ev, Dictionary<ulong, string>? idCache = null)
+                public static CombatLogEventDto Create(float time, CombatLog.Event ev, Dictionary<ulong, string>? idCache = null)
+                {
+                    CombatLogEventDto? dto = Pool.Get<CombatLogEventDto>();
+                    dto.Init(time, ev, idCache);
+                    return dto;
+                }
+
+                private void Init(float time, CombatLog.Event ev, Dictionary<ulong, string>? idCache)
                 {
                     if (ev.attacker == "player")
                         attacker_steam_id = ResolveSteamId(ev.attacker_id, idCache);
@@ -661,6 +685,30 @@ namespace Oxide.Plugins
                     pi = ev.proj_integrity;
                     pm = ev.proj_mismatch;
                     ad = ev.attacker_dead;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    time = 0f;
+                    attacker_steam_id = null;
+                    target_steam_id = null;
+                    attacker = null;
+                    target = null;
+                    weapon = null;
+                    ammo = null;
+                    bone = null;
+                    distance = 0f;
+                    hp_old = 0f;
+                    hp_new = 0f;
+                    info = null;
+                    proj_hits = 0;
+                    pi = 0f;
+                    proj_travel = 0f;
+                    pm = 0f;
+                    desync = 0;
+                    ad = false;
                 }
                 
                 private static string ResolveSteamId(ulong netId, Dictionary<ulong, string>? idCache)
@@ -2117,10 +2165,10 @@ namespace Oxide.Plugins
 
         private class KillsWorker : RustAppWorker
         {
-            public Dictionary<string, HitRecord> WoundedHits = new Dictionary<string, HitRecord>();
-            public List<CourtApi.PluginKillEntryDto> KillsQueue = new List<CourtApi.PluginKillEntryDto>();
+            public readonly Dictionary<string, HitRecord> WoundedHits = new();
+            public readonly List<CourtApi.PluginKillEntryDto> KillsQueue = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -2139,19 +2187,33 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginKillsDto { kills = Pool.Get<List<CourtApi.PluginKillEntryDto>>() };
+                CourtApi.PluginKillsDto? payload = Pool.Get<CourtApi.PluginKillsDto>();
                 payload.kills.AddRange(KillsQueue);
                 KillsQueue.Clear();
 
                 CourtApi.SendKills(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.kills);
+                    Pool.Free(ref payload.kills, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     KillsQueue.AddRange(payload.kills);
-                    Pool.FreeUnmanaged(ref payload.kills);
+                    payload.kills.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < KillsQueue.Count; i++)
+                {
+                    CourtApi.PluginKillEntryDto? item = KillsQueue[i];
+                    Pool.Free(ref item);
+                }
+                KillsQueue.Clear();
             }
         }
 
@@ -3251,28 +3313,29 @@ namespace Oxide.Plugins
             if (!IsRealSteamId(player))
                 return;
 
-            var hitRecord = GetRealInfo(player, info);
-            var targetId = player.UserIDString;
+            HitRecord hitRecord = GetRealInfo(player, info);
+            string? targetId = player.UserIDString;
             if (hitRecord.InitiatorSteamId == null || hitRecord.InitiatorSteamId == targetId)
             {
                 return;
             }
 
-            var playerUserId = player.userID.Get();
+            ulong playerUserId = player.userID.Get();
 
             NextFrame(() =>
             {
-                var log = GetCorrectCombatlog(playerUserId);
-                _RustAppEngine?.KillsWorker?.AddKill(new CourtApi.PluginKillEntryDto
-                {
-                    initiator_steam_id = hitRecord.InitiatorSteamId,
-                    target_steam_id = targetId,
-                    distance = hitRecord.Distance,
-                    game_time = Env.time.ToTimeSpan().ToShortString(),
-                    hit_history = log,
-                    is_headshot = hitRecord.IsHeadshot,
-                    weapon = hitRecord.Weapon
-                });
+                KillsWorker? worker = _RustAppEngine?.KillsWorker;
+                if (worker == null) return;
+
+                List<CourtApi.CombatLogEventDto> log = GetCorrectCombatlog(playerUserId);
+                worker.AddKill(CourtApi.PluginKillEntryDto.Create(
+                    hitRecord.InitiatorSteamId,
+                    targetId,
+                    Env.time.ToTimeSpan().ToShortString(),
+                    hitRecord.Distance,
+                    hitRecord.Weapon,
+                    hitRecord.IsHeadshot,
+                    log));
             });
         }
 
@@ -3758,11 +3821,9 @@ namespace Oxide.Plugins
 
                 int logsLastIndex = logsList.Count - 1;
                 CombatLog.Event killLog = logsList[logsLastIndex];
-
-                List<CourtApi.CombatLogEventDto> container = new(8)
-                {
-                    new CourtApi.CombatLogEventDto(killLog.time, killLog, idCache)
-                };
+                
+                List<CourtApi.CombatLogEventDto>? container = Pool.Get<List<CourtApi.CombatLogEventDto>>();
+                container.Add(CourtApi.CombatLogEventDto.Create(killLog.time, killLog, idCache));
 
                 for (int i = logsLastIndex - 1; i >= 0; i--)
                 {
@@ -3782,7 +3843,7 @@ namespace Oxide.Plugins
                     if (timeSinceEvent > THRESHOLD_MAX_LIMIT)
                         break;
 
-                    container.Add(new CourtApi.CombatLogEventDto(killLog.time, ev, idCache));
+                    container.Add(CourtApi.CombatLogEventDto.Create(killLog.time, ev, idCache));
                 }
 
                 return container;
