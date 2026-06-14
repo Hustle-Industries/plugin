@@ -193,7 +193,9 @@ namespace Oxide.Plugins
 
             public static StableRequest<PluginPairResponse> SendPairDetails(string code)
             {
-                return new StableRequest<PluginPairResponse>($"{BaseUrl}/plugin/pair?code={code}", RequestMethod.POST, new PluginPairPayload());
+                PluginPairPayload payload = new PluginPairPayload();
+                payload.FillSnapshot();
+                return new StableRequest<PluginPairResponse>($"{BaseUrl}/plugin/pair?code={code}", RequestMethod.POST, payload);
             }
 
             #endregion
