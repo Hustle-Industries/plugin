@@ -1801,28 +1801,26 @@ namespace Oxide.Plugins
                 });
             }
 
-            private void CallQueueTasks(List<QueueApi.QueueTaskResponse> queuesTasks)
+            private void CallQueueTasks(List<QueueApi.QueueTaskResponse>? queuesTasks)
             {
                 if (queuesTasks == null || queuesTasks.Count == 0)
-                {
                     return;
-                }
 
                 Dictionary<string, object> queueResponses = new Dictionary<string, object>();
 
-                foreach (var task in queuesTasks)
+                foreach (QueueApi.QueueTaskResponse? task in queuesTasks)
                 {
                     if (QueueProcessedIds.Contains(task.id))
                     {
                         Debug($"This task was already processed: {task.id}");
-                        return;
+                        continue;
                     }
 
                     try
                     {
                         Trace($"Calling: {ConvertToRustAppQueueFormat(task.request.name, true)}");
                         // To get our official response
-                        var response = (object)_RustApp.Call(ConvertToRustAppQueueFormat(task.request.name, true), task.request.data);
+                        object? response = (object)_RustApp.Call(ConvertToRustAppQueueFormat(task.request.name, true), task.request.data);
 
                         QueueProcessedIds.Add(task.id);
                         queueResponses.Add(task.id, response);
