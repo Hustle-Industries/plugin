@@ -2723,6 +2723,8 @@ namespace Oxide.Plugins
             RustAppEngineDestroy();
             DestroyAllUi();
 
+            _steamIdStringCache.Clear();
+            
             CourtApi.PluginServerDto.ResetCache();
         }
 
@@ -4821,7 +4823,7 @@ namespace Oxide.Plugins
 
         private static void ResurrectDictionary<T, V>(Dictionary<T, V> oldDict, Dictionary<T, V> newDict)
         {
-            foreach (var old in oldDict)
+            foreach (KeyValuePair<T, V> old in oldDict)
             {
                 newDict[old.Key] = old.Value;
             }
@@ -4933,10 +4935,7 @@ namespace Oxide.Plugins
         {
             if (_steamIdStringCache.TryGetValue(userId, out string? cached))
                 return cached;
-
-            string s = userId.ToString();
-            _steamIdStringCache[userId] = s;
-            return s;
+            return _steamIdStringCache[userId] = userId.ToString();
         }
 
         private double CurrentTime() => DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
