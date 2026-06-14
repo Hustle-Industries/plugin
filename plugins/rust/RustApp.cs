@@ -2696,12 +2696,13 @@ namespace Oxide.Plugins
         private void Unload()
         {
             _tempDisconnectReasons.Clear();
+            _pendingKick.Clear();
 
             RustAppEngineDestroy();
             DestroyAllUi();
 
             _steamIdStringCache.Clear();
-            
+
             CourtApi.PluginServerDto.ResetCache();
         }
 
@@ -2837,6 +2838,15 @@ namespace Oxide.Plugins
         {
             _tempDisconnectReasons.Remove(player.userID);
 
+            // Deferred kick: CloseConnection ran during a transition gap (e.g. between JoinedGame() and BasePlayer.Spawn()), Connection was in no list yet.
+            if (_pendingKick.Remove(player.userID, out string? pendingReason))
+            {
+                Log($"Closing connection with {player.UserIDString}: {pendingReason} (deferred → OnPlayerConnected)");
+                player.Kick(pendingReason);
+                OnPlayerDisconnectedNormalized(player.UserIDString, pendingReason);
+                return;
+            }
+
             OnPlayerConnectedNormalized(player.UserIDString, IPAddressWithoutPort(player.Connection.ipaddress));
         }
 
@@ -2846,6 +2856,9 @@ namespace Oxide.Plugins
 
         private readonly Dictionary<ulong, string> _tempDisconnectReasons = new();
 
+        // CloseConnection may run during a transition gap between Connection lists (after JoinedGame removes from joining, before BasePlayer.Spawn registers in activePlayerList).
+        private readonly Dictionary<ulong, string> _pendingKick = new();
+
         private void OnPlayerDisconnected(BasePlayer player, string reason)
         {
             OnPlayerDisconnectedNormalized(player.UserIDString, reason);
@@ -2854,6 +2867,8 @@ namespace Oxide.Plugins
         private void OnClientDisconnect(Connection connection, string reason)
         {
             _tempDisconnectReasons[connection.userid] = reason;
+
+            _pendingKick.Remove(connection.userid);
         }
 
         private void OnClientDisconnected(Connection connection, string reason)
@@ -4863,16 +4878,32 @@ namespace Oxide.Plugins
                 Connection? c = queue[i];
                 if (c.userid != targetUserId)
                     continue;
-                
+
                 Log($"Closing connection with {steamId}: {reason} (by queued)");
                 Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            Error($"Failed to close connection with {steamId}: {reason}");
+            // Steam auth pending — Connection is also in m_AuthConnection normally, but check as a safety net
+            List<Connection>? steamWaiting = Auth_Steam.waitingList;
+            for (int i = 0; i < steamWaiting.Count; i++)
+            {
+                Connection? c = steamWaiting[i];
+                if (c.userid != targetUserId)
+                    continue;
 
-            return false;
+                Log($"Closing connection with {steamId}: {reason} (by Auth_Steam.waitingList)");
+                Network.Net.sv.Kick(c, reason);
+                OnPlayerDisconnectedNormalized(steamId, reason);
+                return true;
+            }
+
+            // Connection is in a transition gap (between JoinedGame removing it from joining and BasePlayer.Spawn registering it).
+            // Defer the kick — OnPlayerConnected will finish it once BasePlayer exists.
+            _pendingKick[targetUserId] = reason;
+            Log($"Closing connection with {steamId}: {reason} (deferred → not in any list, will kick on OnPlayerConnected)");
+            return true;
         }
 
         private void SendMessage(BasePlayer player, string message, string initiator_steam_id = "")
