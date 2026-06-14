@@ -103,7 +103,7 @@ namespace Oxide.Plugins
                 
                 public void FillSnapshot()
                 {
-                    // Статика — кэшируем все поля что не меняются за uptime
+                    // Static — cache all fields that do not change during plugin uptime
                     name = _cachedName ??= ConVar.Server.hostname;
                     hostname = _cachedHostname ??= ConVar.Server.hostname;
                     level = _cachedLevel ??= (SteamServer.MapName ?? ConVar.Server.level);
@@ -119,7 +119,7 @@ namespace Oxide.Plugins
                     protocol = _cachedProtocol ??= Protocol.printable.ToString();
                     port = _cachedPort ??= ConVar.Server.port;
 
-                    // Динамика — каждый цикл свежее значение.
+                    // Dynamic — fresh value each cycle.
                     online = BasePlayer.activePlayerList.Count + ServerMgr.Instance.connectionQueue.queue.Count + ServerMgr.Instance.connectionQueue.joining.Count;
                     slots = ConVar.Server.maxplayers;
                     reserved = ServerMgr.Instance.connectionQueue.ReservedCount;
@@ -141,6 +141,24 @@ namespace Oxide.Plugins
                 private static string _cachedVersion;
                 private static string _cachedProtocol;
                 private static int? _cachedPort;
+
+                public static void ResetCache()
+                {
+                    _cachedName = null;
+                    _cachedHostname = null;
+                    _cachedLevel = null;
+                    _cachedLevelUrl = null;
+                    _cachedLevelImageUrl = null;
+                    _cachedWorldSize = null;
+                    _cachedDescription = null;
+                    _cachedBranch = null;
+                    _cachedAvatarBig = null;
+                    _cachedAvatarUrl = null;
+                    _cachedBannerUrl = null;
+                    _cachedVersion = null;
+                    _cachedProtocol = null;
+                    _cachedPort = null;
+                }
 
                 public virtual void LeavePool() { }
 
@@ -576,7 +594,7 @@ namespace Oxide.Plugins
                             PluginPlayerAlertJoinWithIpBanMeta? j = join;
                             Pool.Free(ref j);
                             break;
-                        // Новые IPooled meta-типы добавлять сюда!!
+                        // Add new IPooled meta types here!!
                     }
                     meta = null;
                 }
@@ -2706,6 +2724,8 @@ namespace Oxide.Plugins
 
             RustAppEngineDestroy();
             DestroyAllUi();
+
+            CourtApi.PluginServerDto.ResetCache();
         }
 
         private void OnNewSave(string saveName)
