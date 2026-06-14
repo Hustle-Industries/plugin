@@ -381,7 +381,7 @@ namespace Oxide.Plugins
                 public void LeavePool() => messages = Pool.Get<List<PluginChatMessageDto>>();
                 public void EnterPool()
                 {
-                    if (messages != null) Pool.FreeUnmanaged(ref messages);
+                    if (messages != null) Pool.Free(ref messages, freeElements: true);
                 }
             }
 
@@ -431,7 +431,7 @@ namespace Oxide.Plugins
                 public void LeavePool() => reports = Pool.Get<List<PluginReportDto>>();
                 public void EnterPool()
                 {
-                    if (reports != null) Pool.FreeUnmanaged(ref reports);
+                    if (reports != null) Pool.Free(ref reports, freeElements: true);
                 }
             }
 
@@ -498,7 +498,7 @@ namespace Oxide.Plugins
 
                 public void EnterPool()
                 {
-                    if (sleeping_bags != null) Pool.FreeUnmanaged(ref sleeping_bags);
+                    if (sleeping_bags != null) Pool.Free(ref sleeping_bags, freeElements: true);
                 }
             }
 
@@ -640,7 +640,7 @@ namespace Oxide.Plugins
 
                 public void EnterPool()
                 {
-                    if (alerts != null) Pool.FreeUnmanaged(ref alerts);
+                    if (alerts != null) Pool.Free(ref alerts, freeElements: true);
                 }
             }
 
@@ -776,7 +776,7 @@ namespace Oxide.Plugins
 
                 public void EnterPool()
                 {
-                    if (kills != null) Pool.FreeUnmanaged(ref kills);
+                    if (kills != null) Pool.Free(ref kills, freeElements: true);
                 }
             }
 
@@ -912,6 +912,8 @@ namespace Oxide.Plugins
                 }
                 
                 private static readonly Dictionary<string, string> _normalizedWeaponNameCache = new();
+
+                public static void ClearCache() => _normalizedWeaponNameCache.Clear();
 
                 private static string NormalizeName(string fullName)
                 {
@@ -1824,6 +1826,8 @@ namespace Oxide.Plugins
 
             private static readonly Dictionary<(string name, bool internalCall), string> _queueNameCache = new();
 
+            public static void ClearCache() => _queueNameCache.Clear();
+
             private string ConvertToRustAppQueueFormat(string input, bool isInternalCall)
             {
                 (string input, bool isInternalCall) key = (input, isInternalCall);
@@ -2678,6 +2682,7 @@ namespace Oxide.Plugins
         {
             _tempDisconnectReasons.Clear();
             _pendingKick.Clear();
+            _disconnectProcessed.Clear();
 
             RustAppEngineDestroy();
             DestroyAllUi();
@@ -2685,6 +2690,8 @@ namespace Oxide.Plugins
             _steamIdStringCache.Clear();
 
             CourtApi.PluginServerDto.ResetCache();
+            CourtApi.CombatLogEventDto.ClearCache();
+            QueueWorker.ClearCache();
 
             // Reset Facepunch.Pool buckets owned by this plugin: nested DTOs (Oxide.Plugins.RustApp+CourtApi+...) and generics over them (List`1[[Oxide.Plugins.RustApp+...]]).
             Pool.Clear(Name);
@@ -2817,12 +2824,15 @@ namespace Oxide.Plugins
             if (ulong.TryParse(id, out ulong userid))
                 _tempDisconnectReasons.Remove(userid);
 
+            _disconnectProcessed.Remove(id);
+
             OnPlayerConnectedNormalized(id, IPAddressWithoutPort(ipAddress));
         }
 
         private void OnPlayerConnected(BasePlayer player)
         {
             _tempDisconnectReasons.Remove(player.userID);
+            _disconnectProcessed.Remove(player.UserIDString);
 
             // Deferred kick: CloseConnection ran during a transition gap (e.g. between JoinedGame() and BasePlayer.Spawn()), Connection was in no list yet.
             if (_pendingKick.Remove(player.userID, out string? pendingReason))
@@ -2865,18 +2875,18 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var userid = connection.userid;
-            var reasonFinal = reason;
+            ulong userid = connection.userid;
+            string reasonFinal = reason;
 
-            if (_tempDisconnectReasons.TryGetValue(userid, out var tempReason))
+            if (_tempDisconnectReasons.TryGetValue(userid, out string? tempReason))
             {
                 reasonFinal = $"{reason}: {tempReason}";
             }
 
-            var steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : GetSteamIdString(userid);
+            string? steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : GetSteamIdString(userid);
             OnPlayerDisconnectedNormalized(steamId, reasonFinal);
 
-            if (CourtApi.players.TryGetValue(userid, out var dto))
+            if (CourtApi.players != null && CourtApi.players.TryGetValue(userid, out CourtApi.PluginStatePlayerDto? dto))
             {
                 dto.FreePooledFields();
                 CourtApi.players.Remove(userid);
@@ -4133,8 +4143,13 @@ namespace Oxide.Plugins
             _RustAppEngine?.BanWorker?.CheckBans(steamId, ip);
         }
 
+        private static readonly HashSet<string> _disconnectProcessed = new();
+
         private static void OnPlayerDisconnectedNormalized(string steamId, string reason)
         {
+            if (!_disconnectProcessed.Add(steamId))
+                return;
+
             if (_RustAppEngine?.StateWorker != null)
             {
                 _RustAppEngine.StateWorker.DisconnectReasons[steamId] = reason;
@@ -4584,12 +4599,12 @@ namespace Oxide.Plugins
 
             return true;
         }
-
+        
         private static void Trace(string text)
         {
 #if TRACE
 
-            _RustApp.Puts($"TRACE | {text}");
+            _RustApp?.Puts($"TRACE | {text}");
 
 #endif
         }
@@ -4598,19 +4613,19 @@ namespace Oxide.Plugins
         {
 #if DEBUG
 
-            _RustApp.Puts($"DEBUG | {text}");
+            _RustApp?.Puts($"DEBUG | {text}");
 
 #endif
         }
 
         private static void Log(string text)
         {
-            _RustApp.Puts(text);
+            _RustApp?.Puts(text);
         }
 
         private static void Error(string text)
         {
-            _RustApp.Puts(text);
+            _RustApp?.Puts(text);
         }
 
         private class RustAppWorker : MonoBehaviour
