@@ -271,6 +271,7 @@ namespace Oxide.Plugins
                     try { payload.meta = CollectPlayerMeta(payload.steam_id, payload.meta); } catch (Exception ex) { Debug(ex.ToString()); }
 
                     payload.team ??= Pool.Get<List<string>>();
+                    payload.team.Clear();
 
                     RelationshipManager.PlayerTeam? newTeam = RelationshipManager.ServerInstance.FindPlayersTeam(userid);
                     if (newTeam == null)
@@ -4377,7 +4378,7 @@ namespace Oxide.Plugins
         {
             private Uri url;
             private string method;
-            private object data;
+            private object? data;
 
             public StableRequest(Uri url, RequestMethod requestMethod, object? data)
             {
@@ -4488,6 +4489,7 @@ namespace Oxide.Plugins
                 using var stringWriter = new PooledTextWriterUtf8();
                 _jsonSerializer.Serialize(stringWriter, data);
                 var dataArray = stringWriter.AsArraySegment();
+
                 var dataNativeArray = new NativeArray<byte>(dataArray.Count, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 NativeArray<byte>.Copy(dataArray.Array, dataNativeArray, dataArray.Count);
 
