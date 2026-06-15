@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Reference: ZString
+
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
@@ -8,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using ConVar;
+using Cysharp.Text;
 using JetBrains.Annotations;
 using Network;
 using Newtonsoft.Json;
@@ -28,7 +31,7 @@ using Star = ProtoBuf.PatternFirework.Star;
 
 namespace Oxide.Plugins
 {
-    [Info("RustApp", "RustApp.io", "2.6.1")]
+    [Info("RustApp", "RustApp.io", "3.0.0")]
     public class RustApp : RustPlugin
     {
         #region Variables
@@ -51,6 +54,10 @@ namespace Oxide.Plugins
         private static (string name, string value)[] _ApiHeaders = Array.Empty<(string, string)>();
 
         private static readonly object _false = false; // avoid boxing for hooks
+        private static readonly object _true = true;   // avoid boxing for hooks
+
+        private string _UiCommandName;
+        private string _UiSearchCommand;
 
         #endregion
 
@@ -68,45 +75,145 @@ namespace Oxide.Plugins
         {
             #region Shared
 
-            public class PluginServerDto
+            public class PluginServerDto : Pool.IPooled
             {
-                public string name = ConVar.Server.hostname;
-                public string hostname = ConVar.Server.hostname;
+                public string name;
+                public string hostname;
 
-                public string level = SteamServer.MapName ?? ConVar.Server.level;
-                public string level_url = ConVar.Server.levelurl;
-                // Thanks for the information, DezLife
-                public string level_image_url = MapUploader.ImageUrl;
-                public int world_size = ConVar.Server.worldsize;
-                public string description = ConVar.Server.description + " " + ConVar.Server.motd;
-                public string branch = ConVar.Server.branch;
+                public string level;
+                public string level_url;
+                public string level_image_url;
+                public int world_size;
+                public string description;
+                public string branch;
 
-                public string avatar_big = ConVar.Server.logoimage;
-                public string avatar_url = ConVar.Server.logoimage;
-                public string banner_url = ConVar.Server.headerimage;
+                public string avatar_big;
+                public string avatar_url;
+                public string banner_url;
 
-                public int online = BasePlayer.activePlayerList.Count + ServerMgr.Instance.connectionQueue.queue.Count + ServerMgr.Instance.connectionQueue.joining.Count;
-                public int slots = ConVar.Server.maxplayers;
-                public int reserved = ServerMgr.Instance.connectionQueue.ReservedCount;
+                public int online;
+                public int slots;
+                public int reserved;
 
-                public string version = _RustApp.Version.ToString();
-                public string protocol = Protocol.printable.ToString();
-                public string performance = _RustApp.TotalHookTime.ToString();
+                public string version;
+                public string protocol;
+                public string performance;
 
-                public int port = ConVar.Server.port;
+                public int port;
+                public bool connected;
+                
+                public void FillSnapshot()
+                {
+                    // Static — cache all fields that do not change during plugin uptime
+                    name = _cachedName ??= ConVar.Server.hostname;
+                    hostname = _cachedHostname ??= ConVar.Server.hostname;
+                    level = _cachedLevel ??= (SteamServer.MapName ?? ConVar.Server.level);
+                    level_url = _cachedLevelUrl ??= ConVar.Server.levelurl;
+                    level_image_url = _cachedLevelImageUrl ??= MapUploader.ImageUrl;
+                    world_size = _cachedWorldSize ??= ConVar.Server.worldsize;
+                    description = _cachedDescription ??= (ConVar.Server.description + " " + ConVar.Server.motd);
+                    branch = _cachedBranch ??= ConVar.Server.branch;
+                    avatar_big = _cachedAvatarBig ??= ConVar.Server.logoimage;
+                    avatar_url = _cachedAvatarUrl ??= ConVar.Server.logoimage;
+                    banner_url = _cachedBannerUrl ??= ConVar.Server.headerimage;
+                    version = _cachedVersion ??= _RustApp.Version.ToString();
+                    protocol = _cachedProtocol ??= Protocol.printable.ToString();
+                    port = _cachedPort ??= ConVar.Server.port;
 
-                public bool connected = _RustAppEngine?.AuthWorker.IsAuthed ?? false;
+                    // Dynamic — fresh value each cycle.
+                    online = BasePlayer.activePlayerList.Count + ServerMgr.Instance.connectionQueue.queue.Count + ServerMgr.Instance.connectionQueue.joining.Count;
+                    slots = ConVar.Server.maxplayers;
+                    reserved = ServerMgr.Instance.connectionQueue.ReservedCount;
+                    performance = _RustApp.TotalHookTime.ToString();
+                    connected = _RustAppEngine?.AuthWorker.IsAuthed ?? false;
+                }
+                
+                private static string _cachedName;
+                private static string _cachedHostname;
+                private static string _cachedLevel;
+                private static string _cachedLevelUrl;
+                private static string _cachedLevelImageUrl;
+                private static int? _cachedWorldSize;
+                private static string _cachedDescription;
+                private static string _cachedBranch;
+                private static string _cachedAvatarBig;
+                private static string _cachedAvatarUrl;
+                private static string _cachedBannerUrl;
+                private static string _cachedVersion;
+                private static string _cachedProtocol;
+                private static int? _cachedPort;
+
+                public static void ResetCache()
+                {
+                    _cachedName = null;
+                    _cachedHostname = null;
+                    _cachedLevel = null;
+                    _cachedLevelUrl = null;
+                    _cachedLevelImageUrl = null;
+                    _cachedWorldSize = null;
+                    _cachedDescription = null;
+                    _cachedBranch = null;
+                    _cachedAvatarBig = null;
+                    _cachedAvatarUrl = null;
+                    _cachedBannerUrl = null;
+                    _cachedVersion = null;
+                    _cachedProtocol = null;
+                    _cachedPort = null;
+                }
+
+                public virtual void LeavePool() { }
+
+                public virtual void EnterPool()
+                {
+                    name = null;
+                    hostname = null;
+                    level = null;
+                    level_url = null;
+                    level_image_url = null;
+                    world_size = 0;
+                    description = null;
+                    branch = null;
+                    avatar_big = null;
+                    avatar_url = null;
+                    banner_url = null;
+                    online = 0;
+                    slots = 0;
+                    reserved = 0;
+                    version = null;
+                    protocol = null;
+                    performance = null;
+                    port = 0;
+                    connected = false;
+                }
             }
 
             #endregion
 
             private const string BaseUrl = "https://court.rustapp.io";
+            
+            private const string PairUriPrefix = BaseUrl + "/plugin/pair?code=";
+            private static readonly Uri UriServerInfo = new(BaseUrl + "/plugin/");
+            private static readonly Uri UriState = new(BaseUrl + "/plugin/state");
+            private static readonly Uri UriChat = new(BaseUrl + "/plugin/chat");
+            private static readonly Uri UriReports = new(BaseUrl + "/plugin/reports");
+            private static readonly Uri UriContact = new(BaseUrl + "/plugin/contact");
+            private static readonly Uri UriWipe = new(BaseUrl + "/plugin/wipe");
+            private static readonly Uri UriSleepingBag = new(BaseUrl + "/plugin/sleeping-bag");
+            private static readonly Uri UriBan = new(BaseUrl + "/plugin/ban");
+            private static readonly Uri UriUnban = new(BaseUrl + "/plugin/unban");
+            private static readonly Uri UriAlerts = new(BaseUrl + "/plugin/alerts");
+            private static readonly Uri UriCustomAlert = new(BaseUrl + "/plugin/custom-alert");
+            private static readonly Uri UriSignage = new(BaseUrl + "/plugin/signage");
+            private static readonly Uri UriKills = new(BaseUrl + "/plugin/kills");
+            private static readonly Uri UriPlayerMuteGetActive = new(BaseUrl + "/plugin/player-mute/get-active");
+            private static readonly Uri UriPlayerMuteCreate = new(BaseUrl + "/plugin/player-mute/mute-player");
+            private static readonly Uri UriPlayerMuteDelete = new(BaseUrl + "/plugin/player-mute/unmute-player");
 
             #region GetServerInfo
 
             public static StableRequest<object> GetServerInfo()
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/", RequestMethod.GET, null);
+                return new StableRequest<object>(UriServerInfo, RequestMethod.GET, null);
             }
 
             #endregion
@@ -123,7 +230,10 @@ namespace Oxide.Plugins
 
             public static StableRequest<PluginPairResponse> SendPairDetails(string code)
             {
-                return new StableRequest<PluginPairResponse>($"{BaseUrl}/plugin/pair?code={code}", RequestMethod.POST, new PluginPairPayload());
+                PluginPairPayload payload = new();
+                payload.FillSnapshot();
+                
+                return new StableRequest<PluginPairResponse>(ZString.Concat(PairUriPrefix, code), RequestMethod.POST, payload);
             }
 
             #endregion
@@ -132,11 +242,11 @@ namespace Oxide.Plugins
 
             public class PluginStatePlayerMetaDto
             {
-                public Dictionary<string, string> tags = new Dictionary<string, string>();
-                public Dictionary<string, string> fields = new Dictionary<string, string>();
+                public readonly Dictionary<string, string> tags = new();
+                public readonly Dictionary<string, string> fields = new();
             }
 
-            public static Dictionary<ulong, PluginStatePlayerDto> players = new Dictionary<ulong, PluginStatePlayerDto>();
+            public static Dictionary<ulong, PluginStatePlayerDto> players = new();
 
             public class PluginStatePlayerDto
             {
@@ -147,33 +257,33 @@ namespace Oxide.Plugins
                     {
                         payload = new PluginStatePlayerDto();
                         players[userid] = payload;
-                        payload.steam_id = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : userid.ToString();
+                        payload.steam_id = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : RustApp.GetSteamIdString(userid);
                         payload.steam_name = connection.username.Replace("<blank>", "blank");
                         payload.ip = IPAddressWithoutPort(connection.ipaddress);
                         payload.no_license = DetectNoLicense(connection);
-                        payload.team = new List<string>();
+                        payload.team = Pool.Get<List<string>>();
                     }
 
                     payload.ping = Network.Net.sv.GetAveragePing(connection);
                     payload.seconds_connected = (int)connection.GetSecondsConnected();
                     payload.language = _RustApp.lang.GetLanguage(payload.steam_id);
                     payload.status = status;
-                    try { payload.meta = CollectPlayerMeta(payload.steam_id, payload.meta); } catch { }
+                    try { payload.meta = CollectPlayerMeta(payload.steam_id, payload.meta); } catch (Exception ex) { Debug(ex.ToString()); }
 
+                    payload.team ??= Pool.Get<List<string>>();
                     payload.team.Clear();
 
-                    var newTeam = RelationshipManager.ServerInstance.FindPlayersTeam(userid);
+                    RelationshipManager.PlayerTeam? newTeam = RelationshipManager.ServerInstance.FindPlayersTeam(userid);
                     if (newTeam == null)
                     {
                         return payload;
                     }
 
-                    foreach (var member in newTeam.members)
+                    for (int index = 0; index < newTeam.members.Count; index++)
                     {
+                        ulong member = newTeam.members[index];
                         if (member != userid)
-                        {
                             payload.team.Add(member.ToString());
-                        }
                     }
 
                     return payload;
@@ -181,7 +291,7 @@ namespace Oxide.Plugins
 
                 public static PluginStatePlayerDto FromPlayer(BasePlayer player)
                 {
-                    var payload = FromConnection(player.Connection, "active");
+                    PluginStatePlayerDto payload = FromConnection(player.Connection, "active");
 
                     payload.position = player.transform.position.ToString();
                     payload.rotation = player.eyes.rotation.ToString();
@@ -212,75 +322,142 @@ namespace Oxide.Plugins
 
                 public string status;
 
-                public PluginStatePlayerMetaDto meta = new PluginStatePlayerMetaDto();
+                public PluginStatePlayerMetaDto meta = new();
                 public List<string> team;
+                
+                public void FreePooledFields()
+                {
+                    if (team != null) Pool.FreeUnmanaged(ref team);
+                }
             }
 
             public class PluginStateUpdatePayload : PluginServerDto
             {
-                public PluginServerDto server_info = new PluginServerDto();
+                public PluginServerDto server_info;
 
                 public List<PluginStatePlayerDto> players;
                 public Dictionary<string, string> disconnected;
                 public Dictionary<string, string> team_changes;
+
+                public override void LeavePool()
+                {
+                    base.LeavePool();
+                    server_info = Pool.Get<PluginServerDto>();
+                }
+
+                public override void EnterPool()
+                {
+                    base.EnterPool();
+
+                    if (server_info != null) Pool.Free(ref server_info);
+                    
+                    if (players != null) Pool.FreeUnmanaged(ref players);
+                    if (disconnected != null) Pool.FreeUnmanaged(ref disconnected);
+                    if (team_changes != null) Pool.FreeUnmanaged(ref team_changes);
+                }
             }
 
             public static StableRequest<object> SendStateUpdate(PluginStateUpdatePayload data)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/state", RequestMethod.PUT, data);
+                return new StableRequest<object>(UriState, RequestMethod.PUT, data);
             }
 
             #endregion
 
             #region SendChatMessages
 
-            public class PluginChatMessageDto
+            public class PluginChatMessageDto : Pool.IPooled
             {
                 public string steam_id;
-                [CanBeNull]
                 public string target_steam_id;
-
                 public bool is_team;
-
                 public string text;
+
+                public static PluginChatMessageDto Create(string steamId, string text, bool isTeam, [CanBeNull] string targetSteamId = null)
+                {
+                    PluginChatMessageDto dto = Pool.Get<PluginChatMessageDto>();
+                    dto.steam_id = steamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.is_team = isTeam;
+                    dto.text = text;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    target_steam_id = null;
+                    is_team = false;
+                    text = null;
+                }
             }
 
-            public class PluginChatMessagePayload
+            public class PluginChatMessagePayload : Pool.IPooled
             {
-                public List<PluginChatMessageDto> messages;
+                public List<PluginChatMessageDto>? messages;
+
+                public void LeavePool() => messages = Pool.Get<List<PluginChatMessageDto>>();
+                public void EnterPool()
+                {
+                    if (messages != null) Pool.Free(ref messages, freeElements: true);
+                }
             }
 
             public static StableRequest<object> SendChatMessages(PluginChatMessagePayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/chat", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriChat, RequestMethod.POST, payload);
             }
 
             #endregion
 
             #region SendReports
 
-            public class PluginReportDto
+            public class PluginReportDto : Pool.IPooled
             {
                 public string initiator_steam_id;
-                [CanBeNull]
                 public string target_steam_id;
-
                 public List<string> sub_targets_steam_ids;
-
                 public string reason;
-
-                [CanBeNull]
                 public string message;
+
+                public static PluginReportDto Create(string initiatorSteamId, string targetSteamId, string reason, string message = null)
+                {
+                    PluginReportDto? dto = Pool.Get<PluginReportDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.message = message;
+                    return dto;
+                }
+
+                public void LeavePool() => sub_targets_steam_ids = Pool.Get<List<string>>();
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    reason = null;
+                    message = null;
+                    if (sub_targets_steam_ids != null) Pool.FreeUnmanaged(ref sub_targets_steam_ids);
+                }
             }
 
-            public class PluginReportBatchPayload
+            public class PluginReportBatchPayload : Pool.IPooled
             {
-                public List<CourtApi.PluginReportDto> reports;
+                public List<PluginReportDto>? reports;
+
+                public void LeavePool() => reports = Pool.Get<List<PluginReportDto>>();
+                public void EnterPool()
+                {
+                    if (reports != null) Pool.Free(ref reports, freeElements: true);
+                }
             }
 
             public static StableRequest<object> SendReports(PluginReportBatchPayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/reports", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriReports, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -289,7 +466,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendContact(string steamId, string contact)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/contact", RequestMethod.POST, new { steam_id = steamId, message = contact });
+                return new StableRequest<object>(UriContact, RequestMethod.POST, new { steam_id = steamId, message = contact });
             }
 
             #endregion
@@ -298,48 +475,99 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> SendWipe()
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/wipe", RequestMethod.POST, null);
+                return new StableRequest<object>(UriWipe, RequestMethod.POST, null);
             }
 
             #endregion
 
             #region Sleeping bag
 
-            public class PluginSleepingBagDto
+            public class PluginSleepingBagDto : Pool.IPooled
             {
                 public string initiator_steam_id;
                 public string target_steam_id;
                 public string position;
                 public bool are_friends;
+
+                public static PluginSleepingBagDto Create(string initiatorSteamId, string targetSteamId, string position, bool areFriends)
+                {
+                    PluginSleepingBagDto? dto = Pool.Get<PluginSleepingBagDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.position = position;
+                    dto.are_friends = areFriends;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    position = null;
+                    are_friends = false;
+                }
             }
 
-            public class PluginSleepingBagBatchDto
+            public class PluginSleepingBagBatchDto : Pool.IPooled
             {
-                public List<PluginSleepingBagDto> sleeping_bags = new List<PluginSleepingBagDto>();
+                public List<PluginSleepingBagDto> sleeping_bags;
+
+                public void LeavePool() => sleeping_bags = Pool.Get<List<PluginSleepingBagDto>>();
+
+                public void EnterPool()
+                {
+                    if (sleeping_bags != null) Pool.Free(ref sleeping_bags, freeElements: true);
+                }
             }
 
             public static StableRequest<object> SleepingBagCreate(PluginSleepingBagBatchDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/sleeping-bag", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriSleepingBag, RequestMethod.POST, payload);
             }
 
             #endregion
 
             #region BanCreate
 
-            public class PluginBanCreatePayload
+            public class PluginBanCreatePayload : Pool.IPooled
             {
                 public string target_steam_id;
                 public string reason;
                 public bool global;
                 public bool ban_ip;
-                public string duration;
-                public string comment;
+                public string? duration;
+                public string? comment;
+
+                public static PluginBanCreatePayload Create(string targetSteamId, string reason, string? duration, bool global, bool banIp, string comment)
+                {
+                    PluginBanCreatePayload? dto = Pool.Get<PluginBanCreatePayload>();
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.duration = duration;
+                    dto.global = global;
+                    dto.ban_ip = banIp;
+                    dto.comment = comment;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    target_steam_id = null;
+                    reason = null;
+                    duration = null;
+                    global = false;
+                    ban_ip = false;
+                    comment = null;
+                }
             }
 
             public static StableRequest<object> BanCreate(PluginBanCreatePayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/ban", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriBan, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -348,7 +576,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> BanDelete(string steamId)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/unban", RequestMethod.POST, new { target_steam_id = steamId });
+                return new StableRequest<object>(UriUnban, RequestMethod.POST, new { target_steam_id = steamId });
             }
 
             #endregion
@@ -361,17 +589,59 @@ namespace Oxide.Plugins
                 public static readonly string custom_api = "custom_api";
             }
 
-            public class PluginPlayerAlertDto
+            public class PluginPlayerAlertDto : Pool.IPooled
             {
                 public string type;
                 public object meta;
+
+                public static PluginPlayerAlertDto Create(string type, object meta)
+                {
+                    PluginPlayerAlertDto? dto = Pool.Get<PluginPlayerAlertDto>();
+                    dto.type = type;
+                    dto.meta = meta;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    type = null;
+
+                    switch (meta)
+                    {
+                        case PluginPlayerAlertJoinWithIpBanMeta join:
+                            PluginPlayerAlertJoinWithIpBanMeta? j = join;
+                            Pool.Free(ref j);
+                            break;
+                        // Add new IPooled meta types here!!
+                    }
+                    meta = null;
+                }
             }
 
-            public class PluginPlayerAlertJoinWithIpBanMeta
+            public class PluginPlayerAlertJoinWithIpBanMeta : Pool.IPooled
             {
                 public string steam_id;
                 public string ip;
                 public int ban_id;
+
+                public static PluginPlayerAlertJoinWithIpBanMeta Create(string steamId, string ip, int banId)
+                {
+                    PluginPlayerAlertJoinWithIpBanMeta? dto = Pool.Get<PluginPlayerAlertJoinWithIpBanMeta>();
+                    dto.steam_id = steamId;
+                    dto.ip = ip;
+                    dto.ban_id = banId;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    ip = null;
+                    ban_id = 0;
+                }
             }
 
             public class PluginPlayerAlertDugUpStashMeta
@@ -382,24 +652,60 @@ namespace Oxide.Plugins
                 public string square;
             }
 
-            public static StableRequest<object> CreatePlayerAlerts(List<PluginPlayerAlertDto> alerts)
+            public class PluginPlayerAlertsBatchPayload : Pool.IPooled
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/alerts", RequestMethod.POST, new { alerts });
+                public List<PluginPlayerAlertDto> alerts;
+
+                public void LeavePool() => alerts = Pool.Get<List<PluginPlayerAlertDto>>();
+
+                public void EnterPool()
+                {
+                    if (alerts != null) Pool.Free(ref alerts, freeElements: true);
+                }
+            }
+
+            public static StableRequest<object> CreatePlayerAlerts(PluginPlayerAlertsBatchPayload payload)
+            {
+                return new StableRequest<object>(UriAlerts, RequestMethod.POST, payload);
             }
 
             #endregion
 
             #region PlayerAlertCustom
 
-            public class PluginPlayerAlertCustomDto
+            public class PluginPlayerAlertCustomDto : Pool.IPooled
             {
                 public string msg;
                 public object data;
 
                 public string custom_icon;
-                public bool hide_in_table = false;
+                public bool hide_in_table;
                 public string category;
                 public List<string> custom_links;
+
+                public static PluginPlayerAlertCustomDto Create(string msg, object? data, string? customIcon, string category, List<string>? customLinks)
+                {
+                    PluginPlayerAlertCustomDto? dto = Pool.Get<PluginPlayerAlertCustomDto>();
+                    dto.msg = msg;
+                    dto.data = data;
+                    dto.custom_icon = customIcon;
+                    dto.hide_in_table = false;
+                    dto.category = category;
+                    dto.custom_links = customLinks;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    msg = null;
+                    data = null;
+                    custom_icon = null;
+                    hide_in_table = false;
+                    category = null;
+                    custom_links = null;
+                }
             }
 
             public class PluginPlayerAlertCustomAlertMeta
@@ -411,162 +717,248 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> CreatePlayerAlertsCustom(PluginPlayerAlertCustomDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/custom-alert", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriCustomAlert, RequestMethod.POST, payload);
             }
 
             #endregion
 
             #region SendSignage
 
-            public class PluginSignageCreateDto
+            public class PluginSignageCreateDto : Pool.IPooled
             {
                 public string steam_id;
                 public ulong net_id;
-
                 public byte[] base64_image;
-
                 public string type;
                 public string position;
                 public string square;
+
+                public static PluginSignageCreateDto Create(string steamId, ulong netId, byte[] base64Image, string type, string position, string square)
+                {
+                    PluginSignageCreateDto? dto = Pool.Get<PluginSignageCreateDto>();
+                    dto.steam_id = steamId;
+                    dto.net_id = netId;
+                    dto.base64_image = base64Image;
+                    dto.type = type;
+                    dto.position = position;
+                    dto.square = square;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    net_id = 0;
+                    base64_image = null;
+                    type = null;
+                    position = null;
+                    square = null;
+                }
             }
 
             public static StableRequest<object> SendSignage(PluginSignageCreateDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/signage", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriSignage, RequestMethod.POST, payload);
             }
 
             #endregion
 
             #region SendSignageDestroyed
 
-            public class SignageDestroyedDto
+            public class SignageDestroyedDto : Pool.IPooled
             {
                 public List<string> net_ids;
+
+                public void LeavePool() => net_ids = Pool.Get<List<string>>();
+
+                public void EnterPool()
+                {
+                    if (net_ids != null) Pool.FreeUnmanaged(ref net_ids);
+                }
             }
 
             public static StableRequest<object> SendSignageDestroyed(SignageDestroyedDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/signage", RequestMethod.DELETE, payload);
+                return new StableRequest<object>(UriSignage, RequestMethod.DELETE, payload);
             }
 
             #endregion
 
             #region SendKills
 
-            public class PluginKillsDto
+            public class PluginKillsDto : Pool.IPooled
             {
                 public List<PluginKillEntryDto> kills;
+
+                public void LeavePool() => kills = Pool.Get<List<PluginKillEntryDto>>();
+
+                public void EnterPool()
+                {
+                    if (kills != null) Pool.Free(ref kills, freeElements: true);
+                }
             }
 
-            public class PluginKillEntryDto
+            public class PluginKillEntryDto : Pool.IPooled
             {
                 public string initiator_steam_id;
                 public string target_steam_id;
                 public string game_time;
                 public float distance;
                 public string weapon;
-
                 public bool is_headshot;
-
                 public List<CombatLogEventDto> hit_history;
+
+                public static PluginKillEntryDto Create(string initiatorSteamId, string targetSteamId, string gameTime,
+                    float distance, string weapon, bool isHeadshot, List<CombatLogEventDto> hitHistory)
+                {
+                    PluginKillEntryDto? dto = Pool.Get<PluginKillEntryDto>();
+                    dto.initiator_steam_id = initiatorSteamId;
+                    dto.target_steam_id = targetSteamId;
+                    dto.game_time = gameTime;
+                    dto.distance = distance;
+                    dto.weapon = weapon;
+                    dto.is_headshot = isHeadshot;
+                    dto.hit_history = hitHistory;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    initiator_steam_id = null;
+                    target_steam_id = null;
+                    game_time = null;
+                    distance = 0f;
+                    weapon = null;
+                    is_headshot = false;
+                    
+                    if (hit_history != null)
+                        Pool.Free(ref hit_history, freeElements: true);
+                }
             }
 
-            public class CombatLogEventDto
+            public class CombatLogEventDto : Pool.IPooled
             {
                 public float time;
-
                 public string attacker_steam_id;
-
                 public string target_steam_id;
-
                 public string attacker;
-
                 public string target;
-
                 public string weapon;
-
                 public string ammo;
-
                 public string bone;
-
                 public float distance;
-
                 public float hp_old;
-
                 public float hp_new;
-
                 public string info;
-
                 public int proj_hits;
-
                 public float pi;
-
                 public float proj_travel;
-
                 public float pm;
-
                 public int desync;
-
                 public bool ad;
 
-                public CombatLogEventDto(float time, CombatLog.Event ev)
+                public static CombatLogEventDto Create(float time, CombatLog.Event ev, Dictionary<ulong, string>? idCache = null)
                 {
-                    if (ev.attacker == "player")
-                    {
-                        var attacker = BaseNetworkable.serverEntities.Find(new NetworkableId(ev.attacker_id)) as BasePlayer; ;
-                        this.attacker_steam_id = attacker?.UserIDString ?? "";
-                    }
+                    CombatLogEventDto? dto = Pool.Get<CombatLogEventDto>();
+                    dto.Init(time, ev, idCache);
+                    return dto;
+                }
 
-                    if (ev.target == "player")
-                    {
-                        var target = BaseNetworkable.serverEntities.Find(new NetworkableId(ev.target_id)) as BasePlayer;
-                        this.target_steam_id = target?.UserIDString ?? "";
-                    }
+                private void Init(float time, CombatLog.Event ev, Dictionary<ulong, string>? idCache)
+                {
+                    if (ev.attacker is "player" or "you")
+                        attacker_steam_id = ResolveSteamId(ev.attacker_id, idCache);
+
+                    if (ev.target is "player" or "you")
+                        target_steam_id = ResolveSteamId(ev.target_id, idCache);
 
                     this.time = time - ev.time;
-                    this.attacker = ev.attacker;
-                    this.target = ev.target;
-                    this.weapon = ev.weapon;
-                    this.ammo = ev.ammo;
-                    this.bone = ev.bone;
-                    this.distance = (float)Math.Round(ev.distance, 2);
-                    this.hp_old = (float)Math.Round(ev.health_old, 2);
-                    this.hp_new = (float)Math.Round(ev.health_new, 2);
-                    this.info = ev.info;
-                    this.proj_hits = ev.proj_hits;
-                    this.proj_travel = ev.proj_travel;
-
-                    this.desync = ev.desync;
-
-                    this.pi = ev.proj_integrity;
-                    this.pm = ev.proj_mismatch;
-                    this.ad = ev.attacker_dead;
+                    attacker = ev.attacker;
+                    target = ev.target;
+                    weapon = NormalizeName(ev.weapon);
+                    ammo = ev.ammo;
+                    bone = ev.bone;
+                    distance = (float)Math.Round(ev.distance, 2);
+                    hp_old = (float)Math.Round(ev.health_old, 2);
+                    hp_new = (float)Math.Round(ev.health_new, 2);
+                    info = ev.info;
+                    proj_hits = ev.proj_hits;
+                    proj_travel = ev.proj_travel;
+                    desync = ev.desync;
+                    pi = ev.proj_integrity;
+                    pm = ev.proj_mismatch;
+                    ad = ev.attacker_dead;
                 }
 
-                public string getInitiator()
-                {
-                    if (this.attacker != "player")
-                    {
-                        return this.attacker;
-                    }
+                public void LeavePool() { }
 
-                    return this.attacker_steam_id;
+                public void EnterPool()
+                {
+                    time = 0f;
+                    attacker_steam_id = null;
+                    target_steam_id = null;
+                    attacker = null;
+                    target = null;
+                    weapon = null;
+                    ammo = null;
+                    bone = null;
+                    distance = 0f;
+                    hp_old = 0f;
+                    hp_new = 0f;
+                    info = null;
+                    proj_hits = 0;
+                    pi = 0f;
+                    proj_travel = 0f;
+                    pm = 0f;
+                    desync = 0;
+                    ad = false;
                 }
-
-                public string getTarget()
+                
+                private static string ResolveSteamId(ulong netId, Dictionary<ulong, string>? idCache)
                 {
-                    if (this.target != "player")
-                    {
-                        return this.target;
-                    }
+                    if (idCache != null && idCache.TryGetValue(netId, out string? cached))
+                        return cached;
 
-                    return this.target_steam_id;
+                    string? sid = BaseNetworkable.serverEntities.TryGetEntity<BasePlayer>(new NetworkableId(netId), out BasePlayer? player)
+                        ? player.UserIDString
+                        : "";
+
+                    if (idCache != null) idCache[netId] = sid;
+                    return sid;
+                }
+                
+                private static readonly Dictionary<string, string> _normalizedWeaponNameCache = new();
+
+                public static void ClearCache() => _normalizedWeaponNameCache.Clear();
+
+                private static string NormalizeName(string fullName)
+                {
+                    const string Suffix = ".entity.prefab";
+
+                    if (string.IsNullOrEmpty(fullName) || fullName == "N/A"
+                        || !fullName.EndsWith(Suffix, StringComparison.Ordinal))
+                        return fullName;
+
+                    if (_normalizedWeaponNameCache.TryGetValue(fullName, out string? normalized))
+                        return normalized;
+
+                    int lastSlash = fullName.LastIndexOf('/');
+                    int start = lastSlash + 1;
+                    int len = fullName.Length - start - Suffix.Length;
+
+                    normalized = fullName.Substring(start, len);
+                    _normalizedWeaponNameCache[fullName] = normalized;
+                    return normalized;
                 }
             }
 
             public static StableRequest<object> SendKills(PluginKillsDto payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/kills", RequestMethod.POST, payload);
+                return new StableRequest<object>(UriKills, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -587,11 +979,11 @@ namespace Oxide.Plugins
 
                 public string GetLeftTime()
                 {
-                    var leftMs = LeftSeconds();
+                    long leftMs = LeftSeconds();
                     if (leftMs <= 0) return RustApp._RustApp.lang.GetMessage("Time.Seconds", RustApp._RustApp, null).Replace("%COUNT%", "0");
 
-                    var time = TimeSpan.FromMilliseconds(leftMs);
-                    var parts = new List<string>();
+                    TimeSpan time = TimeSpan.FromMilliseconds(leftMs);
+                    List<string> parts = new();
 
                     if (time.Days > 0)
                         parts.Add(RustApp._RustApp.lang.GetMessage("Time.Days", RustApp._RustApp, null).Replace("%COUNT%", time.Days.ToString()));
@@ -607,7 +999,7 @@ namespace Oxide.Plugins
 
                 public string GetUnmuteDate()
                 {
-                    var date = DateTimeOffset.FromUnixTimeMilliseconds(GetExpiredAt());
+                    DateTimeOffset date = DateTimeOffset.FromUnixTimeMilliseconds(GetExpiredAt());
 
                     return $"{date.DateTime.ToShortDateString()} {date.DateTime.ToShortTimeString()}";
                 }
@@ -625,42 +1017,74 @@ namespace Oxide.Plugins
 
             public static StableRequest<PlayerMuteDtoIn> PlayerMuteGetActive()
             {
-                return new StableRequest<PlayerMuteDtoIn>($"{BaseUrl}/plugin/player-mute/get-active", RequestMethod.GET, null);
+                return new StableRequest<PlayerMuteDtoIn>(UriPlayerMuteGetActive, RequestMethod.GET, null);
             }
 
             #endregion
 
             #region PlayerMuteCreate
 
-            public class PlayerMuteCreateDto
+            public class PlayerMuteCreateDto : Pool.IPooled
             {
                 public string target_steam_id;
                 public string reason;
                 public string duration;
-
                 public bool broadcast;
+                public string? comment;
+                public string? references_message;
 
-                [CanBeNull] public string comment;
-                [CanBeNull] public string references_message;
+                public static PlayerMuteCreateDto Create(string targetSteamId, string reason, string duration, bool broadcast = false, string? comment = null, string? referencesMessage = null)
+                {
+                    PlayerMuteCreateDto? dto = Pool.Get<PlayerMuteCreateDto>();
+                    dto.target_steam_id = targetSteamId;
+                    dto.reason = reason;
+                    dto.duration = duration;
+                    dto.broadcast = broadcast;
+                    dto.comment = comment;
+                    dto.references_message = referencesMessage;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+
+                public void EnterPool()
+                {
+                    target_steam_id = null;
+                    reason = null;
+                    duration = null;
+                    broadcast = false;
+                    comment = null;
+                    references_message = null;
+                }
             }
 
             public static StableRequest<object> PlayerMuteCreate(PlayerMuteCreateDto data)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/player-mute/mute-player", RequestMethod.POST, data);
+                return new StableRequest<object>(UriPlayerMuteCreate, RequestMethod.POST, data);
             }
 
             #endregion
 
             #region PlayerMuteDelete
 
-            public class PlayerMuteDeleteDto
+            public class PlayerMuteDeleteDto : Pool.IPooled
             {
                 public string target_steam_id;
+
+                public static PlayerMuteDeleteDto Create(string targetSteamId)
+                {
+                    PlayerMuteDeleteDto? dto = Pool.Get<PlayerMuteDeleteDto>();
+                    dto.target_steam_id = targetSteamId;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool() => target_steam_id = null;
             }
 
             public static StableRequest<object> PlayerMuteDelete(PlayerMuteDeleteDto data)
             {
-                return new StableRequest<object>($"{BaseUrl}/plugin/player-mute/unmute-player", RequestMethod.POST, data);
+                return new StableRequest<object>(UriPlayerMuteDelete, RequestMethod.POST, data);
             }
 
             #endregion
@@ -687,11 +1111,13 @@ namespace Oxide.Plugins
 
             private const string BaseUrl = "https://queue.rustapp.io";
 
+            private static readonly Uri UriQueueRoot = new(BaseUrl + "/");
+
             #region GetQueueTasks
 
             public static StableRequest<List<QueueTaskResponse>> GetQueueTasks()
             {
-                return new StableRequest<List<QueueTaskResponse>>($"{BaseUrl}/", RequestMethod.GET, null);
+                return new StableRequest<List<QueueTaskResponse>>(UriQueueRoot, RequestMethod.GET, null);
             }
 
             #endregion
@@ -705,7 +1131,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<object> ProcessQueueTasks(QueueTaskResponsePayload payload)
             {
-                return new StableRequest<object>($"{BaseUrl}/", RequestMethod.PUT, payload);
+                return new StableRequest<object>(UriQueueRoot, RequestMethod.PUT, payload);
             }
 
             #endregion
@@ -713,19 +1139,43 @@ namespace Oxide.Plugins
 
         private static class BanApi
         {
-            private static readonly string BaseUrl = "https://ban.rustapp.io";
+            private const string BaseUrl = "https://ban.rustapp.io";
+
+            private static readonly Uri UriBanGetBatchV2 = new(BaseUrl + "/plugin/v2");
 
             #region BanGetBatch
 
-            public class BanGetBatchEntryPayloadDto
+            public class BanGetBatchEntryPayloadDto : Pool.IPooled
             {
                 public string steam_id;
                 public string ip;
+
+                public static BanGetBatchEntryPayloadDto Create(string steamId, string ip)
+                {
+                    BanGetBatchEntryPayloadDto? dto = Pool.Get<BanGetBatchEntryPayloadDto>();
+                    dto.steam_id = steamId;
+                    dto.ip = ip;
+                    return dto;
+                }
+
+                public void LeavePool() { }
+                public void EnterPool()
+                {
+                    steam_id = null;
+                    ip = null;
+                }
             }
 
-            public class BanGetBatchPayload
+            public class BanGetBatchPayload : Pool.IPooled
             {
                 public List<BanGetBatchEntryPayloadDto> players;
+
+                public void LeavePool() => players = Pool.Get<List<BanGetBatchEntryPayloadDto>>();
+
+                public void EnterPool()
+                {
+                    if (players != null) Pool.FreeUnmanaged(ref players);
+                }
             }
 
             public class BanGetBatchEntryResponseDto
@@ -757,7 +1207,7 @@ namespace Oxide.Plugins
 
             public static StableRequest<BanGetBatchResponse> BanGetBatch(BanGetBatchPayload payload)
             {
-                return new StableRequest<BanGetBatchResponse>($"{BaseUrl}/plugin/v2", RequestMethod.POST, payload);
+                return new StableRequest<BanGetBatchResponse>(UriBanGetBatchV2, RequestMethod.POST, payload);
             }
 
             #endregion
@@ -809,8 +1259,27 @@ namespace Oxide.Plugins
 
             public static void write(CheckInfo courtMeta)
             {
-                // Clear checks > 30 days ago
-                courtMeta.LastChecks = courtMeta.LastChecks.Where(v => _RustApp.CurrentTime() - v.Value < 30 * 24 * 60 * 60).ToDictionary(v => v.Key, v => v.Value);
+                const double ThirtyDaysSeconds = 30 * 24 * 60 * 60;
+                double now = _RustApp.CurrentTime();
+
+                List<string>? toRemove = Pool.Get<List<string>>();
+                try
+                {
+                    foreach (KeyValuePair<string, double> kv in courtMeta.LastChecks)
+                    {
+                        if (now - kv.Value >= ThirtyDaysSeconds)
+                            toRemove.Add(kv.Key);
+                    }
+                    
+                    for (int i = 0; i < toRemove.Count; i++)
+                    {
+                        courtMeta.LastChecks.Remove(toRemove[i]);
+                    }
+                }
+                finally
+                {
+                    Pool.FreeUnmanaged(ref toRemove);
+                }
 
                 Interface.Oxide.DataFileSystem.WriteObject("RustApp_CheckMeta", courtMeta);
             }
@@ -896,7 +1365,7 @@ namespace Oxide.Plugins
             public PlayerMuteWorker? PlayerMuteWorker;
             public SleepingBagWorker? SleepingBagWorker;
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -912,7 +1381,7 @@ namespace Oxide.Plugins
             {
                 SetupHeaders();
 
-                AuthWorker = this.gameObject.AddComponent<AuthWorker>();
+                AuthWorker = gameObject.AddComponent<AuthWorker>();
 
                 AuthWorker.OnAuthSuccess += () =>
                 {
@@ -944,7 +1413,7 @@ namespace Oxide.Plugins
 
             private void CreateSubWorkers()
             {
-                ChildObjectToWorkers = this.gameObject.CreateChild();
+                ChildObjectToWorkers = gameObject.CreateChild();
 
                 StateWorker = ChildObjectToWorkers.AddComponent<StateWorker>();
                 CheckWorker = ChildObjectToWorkers.AddComponent<CheckWorker>();
@@ -966,7 +1435,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                UnityEngine.Object.Destroy(ChildObjectToWorkers);
+                Destroy(ChildObjectToWorkers);
             }
         }
 
@@ -976,6 +1445,9 @@ namespace Oxide.Plugins
 
             public Action? OnAuthSuccess;
             public Action? OnAuthFailed;
+            
+            private Action? _cachedAuthSuccess;
+            private Action<string>? _cachedAuthError;
 
             public void CycleAuthUpdate()
             {
@@ -984,99 +1456,99 @@ namespace Oxide.Plugins
 
             public void CheckAuthStatus()
             {
-                Action onError = () =>
+                _cachedAuthSuccess ??= HandleAuthSuccess;
+                _cachedAuthError ??= HandleAuthError;
+
+                CourtApi.GetServerInfo().Execute(_cachedAuthSuccess, _cachedAuthError);
+            }
+
+            private void HandleAuthSuccess()
+            {
+                if (IsAuthed == true)
                 {
-                    if (IsAuthed == false)
-                    {
-                        return;
-                    }
-
-                    IsAuthed = false;
-                    OnAuthFailed?.Invoke();
-                };
-
-                Action onSuccess = () =>
-                {
-                    if (IsAuthed == true)
-                    {
-                        return;
-                    }
-
-                    Log("Connection to the service established");
-
-                    IsAuthed = true;
-                    OnAuthSuccess?.Invoke();
-
-                    if (_TempWipeMarker)
-                    {
-                        _TempWipeMarker = false;
-                        CourtApi.SendWipe().Execute();
-                    }
-                };
-
-                CourtApi.GetServerInfo().Execute(() =>
-                {
-                    onSuccess();
                     return;
-                },
-                (err) =>
+                }
+
+                Log("Connection to the service established");
+
+                IsAuthed = true;
+                OnAuthSuccess?.Invoke();
+
+                if (_TempWipeMarker)
                 {
-                    // secret = ""
-                    var codeError1 = Api.ErrorContains(err, "some of required headers are wrong or missing");
-                    // secret = "123"
-                    var codeError2 = Api.ErrorContains(err, "authorization secret is corrupted");
-                    // server.ip != this.ip || server.port != this.port
-                    var codeError3 = Api.ErrorContains(err, "Check server configuration, required");
+                    _TempWipeMarker = false;
+                    CourtApi.SendWipe().Execute();
+                }
+            }
 
-                    if (codeError1 || codeError2 || codeError3)
+            private void HandleAuthFailure()
+            {
+                if (IsAuthed == false)
+                {
+                    return;
+                }
+
+                IsAuthed = false;
+                OnAuthFailed?.Invoke();
+            }
+
+            private void HandleAuthError(string err)
+            {
+                // secret = ""
+                var codeError1 = Api.ErrorContains(err, "some of required headers are wrong or missing");
+                // secret = "123"
+                var codeError2 = Api.ErrorContains(err, "authorization secret is corrupted");
+                // server.ip != this.ip || server.port != this.port
+                var codeError3 = Api.ErrorContains(err, "Check server configuration, required");
+
+                if (codeError1 || codeError2 || codeError3)
+                {
+                    if (IsAuthed != false)
                     {
-                        if (IsAuthed != false)
-                        {
-                            Error("Your server is not paired with our network, follow instructions to pair server:");
-                            Error("1. If you already start pairing, enter 'ra.pair %code%' which you get from our site");
-                            Error("2. Open servers page, press 'connect server', and enter command which you get on it");
-                        }
-
-                        onError();
-                        return;
+                        Error("Your server is not paired with our network, follow instructions to pair server:");
+                        Error("1. If you already start pairing, enter 'ra.pair %code%' which you get from our site");
+                        Error("2. Open servers page, press 'connect server', and enter command which you get on it");
                     }
 
-                    // version < minVersion
-                    var versionError1 = Api.ErrorContains(err, " is lower than minimal: ");
-                    // if we block some version
-                    var versionError2 = Api.ErrorContains(err, "This version contains serious bug, please update plugin");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    if (versionError1 || versionError2)
-                    {
-                        Error("Your plugin is outdated, you should download new version!");
-                        Error("1. Open servers page, press 'update' near server to download new version, then just replace plugin");
-                        Error("2. If you don't have 'update' button, press settings icon and choose 'download plugin' button");
+                // version < minVersion
+                var versionError1 = Api.ErrorContains(err, " is lower than minimal: ");
+                // if we block some version
+                var versionError2 = Api.ErrorContains(err, "This version contains serious bug, please update plugin");
 
-                        onError();
-                        return;
-                    }
+                if (versionError1 || versionError2)
+                {
+                    Error("Your plugin is outdated, you should download new version!");
+                    Error("1. Open servers page, press 'update' near server to download new version, then just replace plugin");
+                    Error("2. If you don't have 'update' button, press settings icon and choose 'download plugin' button");
 
-                    // if tariff finished/balance zero
-                    var paymentError1 = Api.ErrorContains(err, "У вас кончились средства на балансе проекта, пополните на");
-                    // If some limits broken
-                    var paymentError2 = Api.ErrorContains(err, "Вы превысили лимиты по");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    if (paymentError1)
-                    {
-                        Error("Your balance is not enough to continue working with our service, top-up it");
-                        onError();
-                        return;
-                    }
+                // if tariff finished/balance zero
+                var paymentError1 = Api.ErrorContains(err, "У вас кончились средства на балансе проекта, пополните на");
+                // If some limits broken
+                var paymentError2 = Api.ErrorContains(err, "Вы превысили лимиты по");
 
-                    if (paymentError2)
-                    {
-                        Error("You have reached your limits, please upgrade your plan");
-                        onError();
-                        return;
-                    }
+                if (paymentError1)
+                {
+                    Error("Your balance is not enough to continue working with our service, top-up it");
+                    HandleAuthFailure();
+                    return;
+                }
 
-                    Debug($"Unknown exception in auth: {err}");
-                });
+                if (paymentError2)
+                {
+                    Error("You have reached your limits, please upgrade your plan");
+                    HandleAuthFailure();
+                    return;
+                }
+
+                Debug($"Unknown exception in auth: {err}");
             }
         }
 
@@ -1121,9 +1593,19 @@ namespace Oxide.Plugins
                         return;
                     }
 
-                    Action saveData = () =>
+                    if (_RustAppEngine?.StateWorker != null)
+                        _RustAppEngine?.StateWorker?.SendUpdate(SaveData);
+                    else
+                        SaveData();
+                    
+                    return;
+
+                    void SaveData()
                     {
-                        MetaInfo.write(new MetaInfo { Value = data.token });
+                        MetaInfo.write(new MetaInfo
+                        {
+                            Value = data.token
+                        });
 
                         _RustApp.timer.Once(1f, () => _RustAppEngine?.AuthWorker?.CheckAuthStatus());
 
@@ -1133,15 +1615,6 @@ namespace Oxide.Plugins
                         Log("Pairing completed, reloading...");
 
                         Destroy(this);
-                    };
-
-                    if (_RustAppEngine?.StateWorker != null)
-                    {
-                        _RustAppEngine?.StateWorker?.SendUpdate(() => saveData());
-                    }
-                    else
-                    {
-                        saveData();
                     }
                 },
                 (err) =>
@@ -1162,10 +1635,10 @@ namespace Oxide.Plugins
 
         private class StateWorker : RustAppWorker
         {
-            public Dictionary<string, string> DisconnectReasons = new Dictionary<string, string>();
-            public Dictionary<string, string> TeamChanges = new Dictionary<string, string>();
+            public readonly Dictionary<string, string> DisconnectReasons = new();
+            public readonly Dictionary<string, string> TeamChanges = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1179,27 +1652,26 @@ namespace Oxide.Plugins
 
             public void SendUpdate(Action? onFinished = null)
             {
-                var players = Pool.Get<List<CourtApi.PluginStatePlayerDto>>();
-                CollectPlayers(players);
 
-                var disconnected = Pool.Get<Dictionary<string, string>>();
-                ResurrectDictionary(DisconnectReasons, disconnected);
+                CourtApi.PluginStateUpdatePayload? payload = Pool.Get<CourtApi.PluginStateUpdatePayload>();
+                payload.FillSnapshot();
+                payload.server_info.FillSnapshot();
 
-                var teamChanges = Pool.Get<Dictionary<string, string>>();
-                ResurrectDictionary(TeamChanges, teamChanges);
+                payload.players = Pool.Get<List<CourtApi.PluginStatePlayerDto>>();
+                CollectPlayers(payload.players);
+
+                payload.disconnected = Pool.Get<Dictionary<string, string>>();
+                ResurrectDictionary(DisconnectReasons, payload.disconnected);
+
+                payload.team_changes = Pool.Get<Dictionary<string, string>>();
+                ResurrectDictionary(TeamChanges, payload.team_changes);
 
                 DisconnectReasons.Clear();
                 TeamChanges.Clear();
 
-                CourtApi.SendStateUpdate(new CourtApi.PluginStateUpdatePayload
+                CourtApi.SendStateUpdate(payload).Execute(() =>
                 {
-                    players = players,
-                    disconnected = disconnected,
-                    team_changes = teamChanges
-                }).Execute(() =>
-                {
-                    Pool.FreeUnmanaged(ref disconnected);
-                    Pool.FreeUnmanaged(ref teamChanges);
+                    Pool.Free(ref payload);
                     Trace("State was sent successfull");
                     onFinished?.Invoke();
                 },
@@ -1207,61 +1679,36 @@ namespace Oxide.Plugins
                 {
                     onFinished?.Invoke();
                     Debug($"State sent error: {err}");
-                    ResurrectDictionary(disconnected, DisconnectReasons);
-                    Pool.FreeUnmanaged(ref disconnected);
-                    ResurrectDictionary(teamChanges, TeamChanges);
-                    Pool.FreeUnmanaged(ref teamChanges);
-                });
 
-                Pool.FreeUnmanaged(ref players);
+                    ResurrectDictionary(payload.disconnected, DisconnectReasons);
+                    ResurrectDictionary(payload.team_changes, TeamChanges);
+                    Pool.Free(ref payload);
+                });
             }
 
             private void CollectPlayers(List<CourtApi.PluginStatePlayerDto> playerStateDtos)
             {
-                foreach (var player in BasePlayer.activePlayerList)
+                foreach (BasePlayer? player in BasePlayer.activePlayerList)
                 {
-                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromPlayer(player)); } catch { }
+                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromPlayer(player)); } catch (Exception ex) { Debug($"FromPlayer failed: {ex}"); }
                 }
 
-                foreach (var connection in ServerMgr.Instance.connectionQueue.joining)
+                foreach (Connection? connection in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "joining")); } catch { }
+                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "joining")); } catch (Exception ex) { Debug($"FromConnection(joining) failed: {ex}"); }
                 }
 
-                foreach (var connection in ServerMgr.Instance.connectionQueue.queue)
-                {
-                    if (connection == null)
-                    {
-                        continue;
-                    }
-                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "queued")); } catch { }
-                }
-            }
-
-            private void CollectFakeDisconnects(Dictionary<string, string> disconnect)
-            {
-                foreach (var player in BasePlayer.activePlayerList)
-                {
-                    try { disconnect.Add(player.UserIDString, "plugin-unload"); } catch { }
-                }
-
-                foreach (var connection in ServerMgr.Instance.connectionQueue.joining)
-                {
-                    try { disconnect.Add(connection.userid.ToString(), "plugin-unload"); } catch { }
-                }
-
-                foreach (var connection in ServerMgr.Instance.connectionQueue.queue)
+                foreach (Connection? connection in ServerMgr.Instance.connectionQueue.queue)
                 {
                     if (connection == null)
                     {
                         continue;
                     }
-
-                    try { disconnect.Add(connection.userid.ToString(), "plugin-unload"); } catch { }
+                    try { playerStateDtos.Add(CourtApi.PluginStatePlayerDto.FromConnection(connection, "queued")); } catch (Exception ex) { Debug($"FromConnection(queued) failed: {ex}"); }
                 }
             }
 
-            public void OnDestroy()
+            public new void OnDestroy()
             {
                 base.OnDestroy();
             }
@@ -1269,26 +1716,16 @@ namespace Oxide.Plugins
 
         private class CheckWorker : RustAppWorker
         {
-            private Dictionary<string, bool> ShowedNoticyCache = new Dictionary<string, bool>();
+            private readonly Dictionary<string, bool> ShowedNoticyCache = new();
 
-            public bool IsNoticeActive(string steamId)
-            {
-                if (!ShowedNoticyCache.TryGetValue(steamId, out var value))
-                {
-                    return false;
-                }
-
-                return value;
-            }
+            public bool IsNoticeActive(string steamId) => ShowedNoticyCache.GetValueOrDefault(steamId, false);
 
             public void SetNoticeActive(string steamId, bool value)
             {
-                BasePlayer player = null;
+                BasePlayer? player = null;
 
-                if (ulong.TryParse(steamId, out var userid))
-                {
+                if (ulong.TryParse(steamId, out ulong userid))
                     player = BasePlayer.FindByID(userid);
-                }
 
                 if (player != null)
                 {
@@ -1321,16 +1758,14 @@ namespace Oxide.Plugins
                 }
             }
 
-            public void OnDestroy()
+            public new void OnDestroy()
             {
                 base.OnDestroy();
 
-                foreach (var check in ShowedNoticyCache.ToList())
+                foreach (KeyValuePair<string, bool> check in ShowedNoticyCache.ToList())
                 {
-                    if (check.Value == false)
-                    {
+                    if (!check.Value)
                         continue;
-                    }
 
                     SetNoticeActive(check.Key, false);
                 }
@@ -1339,10 +1774,9 @@ namespace Oxide.Plugins
 
         private class QueueWorker : RustAppWorker
         {
+            private readonly HashSet<string> QueueProcessedIds = new();
 
-            private List<string> QueueProcessedIds = new List<string>();
-
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1359,28 +1793,26 @@ namespace Oxide.Plugins
                 });
             }
 
-            private void CallQueueTasks(List<QueueApi.QueueTaskResponse> queuesTasks)
+            private void CallQueueTasks(List<QueueApi.QueueTaskResponse>? queuesTasks)
             {
                 if (queuesTasks == null || queuesTasks.Count == 0)
-                {
                     return;
-                }
 
                 Dictionary<string, object> queueResponses = new Dictionary<string, object>();
 
-                foreach (var task in queuesTasks)
+                foreach (QueueApi.QueueTaskResponse? task in queuesTasks)
                 {
                     if (QueueProcessedIds.Contains(task.id))
                     {
                         Debug($"This task was already processed: {task.id}");
-                        return;
+                        continue;
                     }
 
                     try
                     {
                         Trace($"Calling: {ConvertToRustAppQueueFormat(task.request.name, true)}");
                         // To get our official response
-                        var response = (object)_RustApp.Call(ConvertToRustAppQueueFormat(task.request.name, true), task.request.data);
+                        object? response = (object)_RustApp.Call(ConvertToRustAppQueueFormat(task.request.name, true), task.request.data);
 
                         QueueProcessedIds.Add(task.id);
                         queueResponses.Add(task.id, response);
@@ -1402,9 +1834,7 @@ namespace Oxide.Plugins
             private void ProcessQueueTasks(Dictionary<string, object> queueResponses)
             {
                 if (queueResponses.Keys.Count == 0)
-                {
                     return;
-                }
 
                 QueueApi.ProcessQueueTasks(new QueueApi.QueueTaskResponsePayload { data = queueResponses }).Execute(() =>
                 {
@@ -1413,29 +1843,39 @@ namespace Oxide.Plugins
                 },
                 (err) =>
                 {
-                    QueueProcessedIds.Clear();
                     Debug($"Failed to process queue: {err}");
                 });
             }
 
+
+            private static readonly Dictionary<(string name, bool internalCall), string> _queueNameCache = new();
+
+            public static void ClearCache() => _queueNameCache.Clear();
+
             private string ConvertToRustAppQueueFormat(string input, bool isInternalCall)
             {
-                var words = input.Replace("court/", "").Split('-');
+                (string input, bool isInternalCall) key = (input, isInternalCall);
+                if (_queueNameCache.TryGetValue(key, out string? cached))
+                    return cached;
+
+                string[]? words = input.Replace("court/", "").Split('-');
 
                 for (int i = 0; i < words.Length; i++)
                 {
                     words[i] = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(words[i]);
                 }
 
-                return $"RustApp_{(isInternalCall ? "Internal" : "")}Queue_" + string.Join("", words);
+                string result = $"RustApp_{(isInternalCall ? "Internal" : "")}Queue_" + string.Join("", words);
+                _queueNameCache[key] = result;
+                return result;
             }
         }
 
         private class BanWorker : RustAppWorker
         {
-            private List<BanApi.BanGetBatchEntryPayloadDto> BanUpdateQueue = new List<BanApi.BanGetBatchEntryPayloadDto>();
+            private readonly Dictionary<string, BanApi.BanGetBatchEntryPayloadDto> BanUpdateQueue = new();
 
-            public void Awake()
+            public new void Awake()
             {
                 base.Awake();
 
@@ -1446,19 +1886,19 @@ namespace Oxide.Plugins
 
             private void DefaultScanAllPlayers()
             {
-                foreach (var player in BasePlayer.activePlayerList)
+                foreach (BasePlayer? player in BasePlayer.activePlayerList)
                 {
-                    try { CheckBans(player); } catch { }
+                    try { CheckBans(player); } catch (Exception ex) { Debug($"CheckBans(player) failed: {ex}"); }
                 }
 
-                foreach (var queued in ServerMgr.Instance.connectionQueue.queue)
+                foreach (Connection? queued in ServerMgr.Instance.connectionQueue.queue)
                 {
-                    try { CheckBans(queued.userid.ToString(), IPAddressWithoutPort(queued.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(queued.userid), IPAddressWithoutPort(queued.ipaddress)); } catch (Exception ex) { Debug($"CheckBans(queued) failed: {ex}"); }
                 }
 
-                foreach (var loading in ServerMgr.Instance.connectionQueue.joining)
+                foreach (Connection? loading in ServerMgr.Instance.connectionQueue.joining)
                 {
-                    try { CheckBans(loading.userid.ToString(), IPAddressWithoutPort(loading.ipaddress)); } catch { }
+                    try { CheckBans(GetSteamIdString(loading.userid), IPAddressWithoutPort(loading.ipaddress)); } catch (Exception ex) { Debug($"CheckBans(loading) failed: {ex}"); }
                 }
             }
 
@@ -1469,21 +1909,17 @@ namespace Oxide.Plugins
 
             public void CheckBans(string steamId, string ip)
             {
-                // Provide an option to bypass ban checks enforced by external plugins
-                var over = Interface.Oxide.CallHook("RustApp_CanIgnoreBan", steamId);
+                object? over = Interface.Oxide.CallHook("RustApp_CanIgnoreBan", steamId);
                 if (over != null)
+                    return;
+
+                if (BanUpdateQueue.TryGetValue(steamId, out BanApi.BanGetBatchEntryPayloadDto? existing))
                 {
+                    existing.ip = ip;
                     return;
                 }
 
-                var exists = BanUpdateQueue.Find(v => v.steam_id == steamId);
-                if (exists != null)
-                {
-                    exists.ip = ip;
-                    return;
-                }
-
-                BanUpdateQueue.Add(new BanApi.BanGetBatchEntryPayloadDto { steam_id = steamId, ip = ip });
+                BanUpdateQueue[steamId] = BanApi.BanGetBatchEntryPayloadDto.Create(steamId, ip);
             }
 
             private void CycleBanUpdate()
@@ -1495,32 +1931,18 @@ namespace Oxide.Plugins
 
                 CycleBanUpdateWrapper((steamId, ban) =>
                 {
-                    var queuePosition = BanUpdateQueue.Find(v => v.steam_id == steamId);
-                    if (queuePosition != null)
-                    {
-                        BanUpdateQueue.Remove(queuePosition);
-                    }
+                    BanUpdateQueue.Remove(steamId);
 
                     if (ban == null)
-                    {
                         return;
-                    }
 
                     if (ban.sync_project_id != 0 && !ban.sync_should_kick)
-                    {
                         return;
-                    }
 
                     if (ban.steam_id == steamId)
-                    {
-                        // Ban is directly to this steamId
                         ReactOnDirectBan(steamId, ban);
-                    }
                     else
-                    {
-                        // Ban was found by IP
                         ReactOnIpBan(steamId, ban);
-                    }
                 });
             }
 
@@ -1531,31 +1953,81 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new BanApi.BanGetBatchPayload { players = Pool.Get<List<BanApi.BanGetBatchEntryPayloadDto>>() };
-                payload.players.AddRange(BanUpdateQueue);
+                BanApi.BanGetBatchPayload? payload = Pool.Get<BanApi.BanGetBatchPayload>();
+                
+                foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
+                    payload.players.Add(entry);
+                
                 BanUpdateQueue.Clear();
 
                 BanApi.BanGetBatch(payload).Execute((data) =>
                 {
-                    payload.players.ForEach(originalPlayer =>
+                    Dictionary<string, BanApi.BanGetBatchEntryResponseDto>? entriesByPid = Pool.Get<Dictionary<string, BanApi.BanGetBatchEntryResponseDto>>();
+                    try
                     {
-                        var exists = data?.entries?.Find(banPlayer => banPlayer.steam_id == originalPlayer.steam_id);
-                        var ban = exists?.bans?.FirstOrDefault(v => v.computed_is_active);
-                        callback.Invoke(originalPlayer.steam_id, ban);
-                    });
-                    Pool.FreeUnmanaged(ref payload.players);
+                        if (data?.entries != null)
+                        {
+                            for (int i = 0; i < data.entries.Count; i++)
+                            {
+                                BanApi.BanGetBatchEntryResponseDto? e = data.entries[i];
+                                if (e?.steam_id != null) entriesByPid[e.steam_id] = e;
+                            }
+                        }
+
+                        for (int i = 0; i < payload.players.Count; i++)
+                        {
+                            BanApi.BanGetBatchEntryPayloadDto? originalPlayer = payload.players[i];
+                            BanApi.BanDto? active = null;
+                            if (entriesByPid.TryGetValue(originalPlayer.steam_id, out BanApi.BanGetBatchEntryResponseDto? entry) && entry.bans != null)
+                            {
+                                for (int j = 0; j < entry.bans.Count; j++)
+                                {
+                                    if (entry.bans[j].computed_is_active)
+                                    {
+                                        active = entry.bans[j];
+                                        break;
+                                    }
+                                }
+                            }
+                            callback.Invoke(originalPlayer.steam_id, active);
+                        }
+                    }
+                    finally
+                    {
+                        Pool.FreeUnmanaged(ref entriesByPid);
+                        Pool.Free(ref payload.players, freeElements: true);
+                        Pool.Free(ref payload);
+                    }
                 },
                 (_) =>
                 {
                     Error($"Failed to process ban checks ({payload.players.Count}), retrying...");
-                    BanUpdateQueue.AddRange(payload.players);
-                    Pool.FreeUnmanaged(ref payload.players);
+                    for (int i = 0; i < payload.players.Count; i++)
+                    {
+                        BanApi.BanGetBatchEntryPayloadDto? p = payload.players[i];
+                        BanUpdateQueue[p.steam_id] = p;
+                    }
+                    payload.players.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                foreach (BanApi.BanGetBatchEntryPayloadDto? entry in BanUpdateQueue.Values)
+                {
+                    if (entry == null) continue;
+                    BanApi.BanGetBatchEntryPayloadDto? e = entry;
+                    Pool.Free(ref e);
+                }
+                BanUpdateQueue.Clear();
             }
 
             public void ReactOnDirectBan(string steamId, BanApi.BanDto ban)
             {
-                var format = "";
+                string? format = "";
 
                 if (ban.sync_project_id != 0)
                 {
@@ -1572,11 +2044,11 @@ namespace Oxide.Plugins
                       : _RustApp.lang.GetMessage("System.Ban.Temp.Kick", _RustApp, steamId);
                 }
 
-                var time = new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
+                string time = new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)
                   .AddMilliseconds(ban.expired_at + 3 * 60 * 60 * 1_000)
                   .ToString("dd.MM.yyyy HH:mm");
 
-                var finalText = format
+                string finalText = format
                   .Replace("%REASON%", ban.reason)
                   .Replace("%TIME%", time);
 
@@ -1587,24 +2059,20 @@ namespace Oxide.Plugins
             {
                 _RustApp.CloseConnection(steamId, _RustApp.lang.GetMessage("System.Ban.Ip.Kick", _RustApp, steamId));
 
-                _RustAppEngine?.PlayerAlertsWorker?.SavePlayerAlert(new CourtApi.PluginPlayerAlertDto
-                {
-                    type = CourtApi.PluginPlayerAlertType.join_with_ip_ban,
-                    meta = new CourtApi.PluginPlayerAlertJoinWithIpBanMeta
-                    {
-                        steam_id = steamId,
-                        ip = ban.ban_ip,
-                        ban_id = ban.id
-                    }
-                });
+                PlayerAlertsWorker? worker = _RustAppEngine?.PlayerAlertsWorker;
+                if (worker == null) return;
+
+                CourtApi.PluginPlayerAlertJoinWithIpBanMeta meta = CourtApi.PluginPlayerAlertJoinWithIpBanMeta.Create(steamId, ban.ban_ip, ban.id);
+                worker.SavePlayerAlert(CourtApi.PluginPlayerAlertDto.Create(
+                    CourtApi.PluginPlayerAlertType.join_with_ip_ban, meta));
             }
         }
 
         private class ChatWorker : RustAppWorker
         {
-            private List<CourtApi.PluginChatMessageDto> QueueMessages = new List<CourtApi.PluginChatMessageDto>();
+            private readonly List<CourtApi.PluginChatMessageDto> QueueMessages = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1623,28 +2091,43 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginChatMessagePayload { messages = Pool.Get<List<CourtApi.PluginChatMessageDto>>() };
+                CourtApi.PluginChatMessagePayload payload = Pool.Get<CourtApi.PluginChatMessagePayload>();
                 payload.messages.AddRange(QueueMessages);
                 QueueMessages.Clear();
 
                 CourtApi.SendChatMessages(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.messages);
+                    Pool.Free(ref payload.messages, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     QueueMessages.AddRange(payload.messages);
-                    Pool.FreeUnmanaged(ref payload.messages);
+                    payload.messages.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < QueueMessages.Count; i++)
+                {
+                    CourtApi.PluginChatMessageDto? item = QueueMessages[i];
+                    if (item == null) continue;
+                    Pool.Free(ref item);
+                }
+                QueueMessages.Clear();
             }
         }
 
         private class ReportWorker : RustAppWorker
         {
-            public Dictionary<ulong, double> ReportCooldowns = new Dictionary<ulong, double>();
-            private List<CourtApi.PluginReportDto> QueueReportSend = new List<CourtApi.PluginReportDto>();
+            public readonly Dictionary<ulong, double> ReportCooldowns = new();
+            private readonly List<CourtApi.PluginReportDto> QueueReportSend = new();
 
-            public void Awake()
+            public new void Awake()
             {
                 base.Awake();
 
@@ -1663,37 +2146,49 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginReportBatchPayload { reports = Pool.Get<List<CourtApi.PluginReportDto>>() };
+                CourtApi.PluginReportBatchPayload? payload = Pool.Get<CourtApi.PluginReportBatchPayload>();
                 payload.reports.AddRange(QueueReportSend);
                 QueueReportSend.Clear();
 
                 CourtApi.SendReports(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.reports);
+                    Pool.Free(ref payload.reports, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     QueueReportSend.AddRange(payload.reports);
-                    Pool.FreeUnmanaged(ref payload.reports);
+                    payload.reports.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < QueueReportSend.Count; i++)
+                {
+                    CourtApi.PluginReportDto item = QueueReportSend[i];
+                    if (item == null) continue;
+                    Pool.Free(ref item);
+                }
+                QueueReportSend.Clear();
             }
         }
 
         private class PlayerAlertsWorker : RustAppWorker
         {
-            public List<CourtApi.PluginPlayerAlertDto> PlayerAlertQueue = new List<CourtApi.PluginPlayerAlertDto>();
+            private readonly List<CourtApi.PluginPlayerAlertDto> PlayerAlertQueue = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
                 InvokeRepeating(nameof(CycleSendPlayerAlerts), 0f, 5f);
             }
 
-            public void SavePlayerAlert(CourtApi.PluginPlayerAlertDto alert)
-            {
-                PlayerAlertQueue.Add(alert);
-            }
+            public void SavePlayerAlert(CourtApi.PluginPlayerAlertDto alert) => PlayerAlertQueue.Add(alert);
 
             private void CycleSendPlayerAlerts()
             {
@@ -1702,27 +2197,42 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var alerts = Pool.Get<List<CourtApi.PluginPlayerAlertDto>>();
-                alerts.AddRange(PlayerAlertQueue);
+                CourtApi.PluginPlayerAlertsBatchPayload? payload = Pool.Get<CourtApi.PluginPlayerAlertsBatchPayload>();
+                payload.alerts.AddRange(PlayerAlertQueue);
                 PlayerAlertQueue.Clear();
 
-                CourtApi.CreatePlayerAlerts(alerts).Execute(() =>
+                CourtApi.CreatePlayerAlerts(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref alerts);
+                    Pool.Free(ref payload.alerts, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
-                    PlayerAlertQueue.AddRange(alerts);
-                    Pool.FreeUnmanaged(ref alerts);
+                    PlayerAlertQueue.AddRange(payload.alerts);
+                    payload.alerts.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < PlayerAlertQueue.Count; i++)
+                {
+                    CourtApi.PluginPlayerAlertDto? item = PlayerAlertQueue[i];
+                    if (item == null) continue;
+                    Pool.Free(ref item);
+                }
+                PlayerAlertQueue.Clear();
             }
         }
 
         private class SignageWorker : RustAppWorker
         {
-            private List<string> DestroyedSignagesQueue = new List<string>();
+            private readonly List<string> DestroyedSignagesQueue = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1738,24 +2248,22 @@ namespace Oxide.Plugins
             {
                 try
                 {
-                    var obj = new CourtApi.PluginSignageCreateDto
-                    {
-                        steam_id = update.PlayerId,
-                        net_id = update.Entity.net.ID.Value,
+                    Vector3 pos = update.Entity.transform.position;
+                    CourtApi.PluginSignageCreateDto? obj = CourtApi.PluginSignageCreateDto.Create(
+                        update.PlayerId,
+                        update.Entity.net.ID.Value,
+                        update.GetImage(),
+                        update.Entity.ShortPrefabName,
+                        pos.ToString(),
+                        MapHelper.PositionToString(pos));
 
-                        base64_image = update.GetImage(),
+                    CourtApi.SendSignage(obj).Execute();
 
-                        type = update.Entity.ShortPrefabName,
-                        position = update.Entity.transform.position.ToString(),
-                        square = MapHelper.PositionToString(update.Entity.transform.position)
-                    };
-
-                    CourtApi.SendSignage(obj)
-                      .Execute();
+                    Pool.Free(ref obj);
                 }
                 catch
                 {
-
+                    // ignored
                 }
             }
 
@@ -1766,27 +2274,34 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.SignageDestroyedDto { net_ids = Pool.Get<List<string>>() };
+                CourtApi.SignageDestroyedDto? payload = Pool.Get<CourtApi.SignageDestroyedDto>();
                 payload.net_ids.AddRange(DestroyedSignagesQueue);
                 DestroyedSignagesQueue.Clear();
 
                 CourtApi.SendSignageDestroyed(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.net_ids);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     DestroyedSignagesQueue.AddRange(payload.net_ids);
-                    Pool.FreeUnmanaged(ref payload.net_ids);
+                    payload.net_ids.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+                DestroyedSignagesQueue.Clear();
             }
         }
 
         private class SleepingBagWorker : RustAppWorker
         {
-            public List<CourtApi.PluginSleepingBagDto> SleepingBags = new List<CourtApi.PluginSleepingBagDto>();
+            private readonly List<CourtApi.PluginSleepingBagDto> SleepingBags = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1805,32 +2320,43 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginSleepingBagBatchDto
-                {
-                    sleeping_bags = Pool.Get<List<CourtApi.PluginSleepingBagDto>>()
-                };
-
+                CourtApi.PluginSleepingBagBatchDto? payload = Pool.Get<CourtApi.PluginSleepingBagBatchDto>();
                 payload.sleeping_bags.AddRange(SleepingBags);
                 SleepingBags.Clear();
 
                 CourtApi.SleepingBagCreate(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.sleeping_bags);
+                    Pool.Free(ref payload.sleeping_bags, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     SleepingBags.AddRange(payload.sleeping_bags);
-                    Pool.FreeUnmanaged(ref payload.sleeping_bags);
+                    payload.sleeping_bags.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < SleepingBags.Count; i++)
+                {
+                    CourtApi.PluginSleepingBagDto? item = SleepingBags[i];
+                    if (item == null) continue;
+                    Pool.Free(ref item);
+                }
+                SleepingBags.Clear();
             }
         }
 
         private class KillsWorker : RustAppWorker
         {
-            public Dictionary<string, HitRecord> WoundedHits = new Dictionary<string, HitRecord>();
-            public List<CourtApi.PluginKillEntryDto> KillsQueue = new List<CourtApi.PluginKillEntryDto>();
+            public readonly Dictionary<string, HitRecord> WoundedHits = new();
+            private readonly List<CourtApi.PluginKillEntryDto> KillsQueue = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1849,27 +2375,42 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var payload = new CourtApi.PluginKillsDto { kills = Pool.Get<List<CourtApi.PluginKillEntryDto>>() };
+                CourtApi.PluginKillsDto? payload = Pool.Get<CourtApi.PluginKillsDto>();
                 payload.kills.AddRange(KillsQueue);
                 KillsQueue.Clear();
 
                 CourtApi.SendKills(payload).Execute(() =>
                 {
-                    Pool.FreeUnmanaged(ref payload.kills);
+                    Pool.Free(ref payload.kills, freeElements: true);
+                    Pool.Free(ref payload);
                 },
                 (_) =>
                 {
                     KillsQueue.AddRange(payload.kills);
-                    Pool.FreeUnmanaged(ref payload.kills);
+                    payload.kills.Clear();
+                    Pool.Free(ref payload);
                 });
+            }
+
+            public new void OnDestroy()
+            {
+                base.OnDestroy();
+
+                for (int i = 0; i < KillsQueue.Count; i++)
+                {
+                    CourtApi.PluginKillEntryDto? item = KillsQueue[i];
+                    if (item == null) continue;
+                    Pool.Free(ref item);
+                }
+                KillsQueue.Clear();
             }
         }
 
         private class PlayerMuteWorker : RustAppWorker
         {
-            public Dictionary<ulong, CourtApi.PlayerMuteDto> PlayerMutes = new Dictionary<ulong, CourtApi.PlayerMuteDto>();
+            private readonly Dictionary<ulong, CourtApi.PlayerMuteDto> PlayerMutes = new();
 
-            private void Awake()
+            private new void Awake()
             {
                 base.Awake();
 
@@ -1878,49 +2419,29 @@ namespace Oxide.Plugins
 
             private void CycleUpdateMutes()
             {
-                var request = CourtApi.PlayerMuteGetActive();
+                StableRequest<CourtApi.PlayerMuteDtoIn> request = CourtApi.PlayerMuteGetActive();
 
                 request.Execute((data) =>
                 {
                     PlayerMutes.Clear();
-                    data?.data?.ForEach(v => AddPlayerMute(v));
+                    data?.data?.ForEach(AddPlayerMute);
                 },
                 (_) => { });
             }
 
             public void AddPlayerMute(CourtApi.PlayerMuteDto playerMuteDto)
             {
-                var steamId = ulong.Parse(playerMuteDto.target_steam_id);
-
-                if (!PlayerMutes.ContainsKey(steamId))
-                {
-                    PlayerMutes.Add(steamId, playerMuteDto);
-                }
-
+                ulong steamId = ulong.Parse(playerMuteDto.target_steam_id);
                 PlayerMutes[steamId] = playerMuteDto;
             }
 
             public void RemovePlayerMute(CourtApi.PlayerMuteDto playerMuteDto)
             {
-                var steamId = ulong.Parse(playerMuteDto.target_steam_id);
-
-                if (!PlayerMutes.ContainsKey(steamId))
-                {
-                    return;
-                }
-
+                ulong steamId = ulong.Parse(playerMuteDto.target_steam_id);
                 PlayerMutes.Remove(steamId);
             }
 
-            public CourtApi.PlayerMuteDto? GetMute(ulong steamId)
-            {
-                if (PlayerMutes.TryGetValue(steamId, out var mute))
-                {
-                    return mute;
-                }
-
-                return null;
-            }
+            public CourtApi.PlayerMuteDto? GetMute(ulong steamId) => PlayerMutes.GetValueOrDefault(steamId);
         }
 
         #endregion
@@ -1950,10 +2471,11 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (_RustAppEngine.ReportWorker.ReportCooldowns.ContainsKey(player.userID) && _RustAppEngine.ReportWorker.ReportCooldowns[player.userID] > CurrentTime())
+            var now = CurrentTime();
+            if (_RustAppEngine.ReportWorker.ReportCooldowns.TryGetValue(player.userID, out var cooldownUntil) && cooldownUntil > now)
             {
-                var msg = lang.GetMessage("Cooldown", this, player.UserIDString).Replace("%TIME%",
-                    $"{(_RustAppEngine.ReportWorker.ReportCooldowns[player.userID] - CurrentTime()).ToString("0")}");
+                var msg = lang.GetMessage("Cooldown", this, player.UserIDString)
+                    .Replace("%TIME%", $"{(cooldownUntil - now).ToString("0")}");
 
                 SoundToast(player, msg, SoundToastType.Error);
                 return;
@@ -2041,15 +2563,8 @@ namespace Oxide.Plugins
             string reason = args.GetString(1);
             string duration = args.GetString(2);
 
-            BanCreate(steamId, new CourtApi.PluginBanCreatePayload
-            {
-                target_steam_id = steamId,
-                reason = reason,
-                global = global,
-                ban_ip = banIp,
-                duration = duration.Length > 0 ? duration : null,
-                comment = "Ban via console"
-            });
+            BanCreate(steamId, CourtApi.PluginBanCreatePayload.Create(
+                steamId, reason, duration.Length > 0 ? duration : null, global, banIp, "Ban via console"));
         }
 
         [ConsoleCommand("ra.unban")]
@@ -2071,6 +2586,52 @@ namespace Oxide.Plugins
 
             BanDelete(steamId);
         }
+        
+        private void OnUiCommand(ConsoleSystem.Arg args)
+        {
+            BasePlayer player = args.Player();
+            if (player == null) return;
+
+            switch (args.GetString(0))
+            {
+                case "page":
+                    DrawReportInterface(player, args.GetInt(1), args.GetString(2), redraw: true);
+                    PlayEffect(player, FxButtonUnpress);
+                    break;
+
+                case "search":
+                    string typed;
+                    if (args.HasArgs(2))
+                    {
+                        StringBuilder sb = Pool.Get<StringBuilder>();
+                        try
+                        {
+                            for (int i = 1; i < args.Args.Length; i++)
+                            {
+                                if (i > 1) sb.Append(' ');
+                                sb.Append(args.GetString(i));
+                            }
+                            typed = sb.ToString();
+                        }
+                        finally
+                        {
+                            Pool.FreeUnmanaged(ref sb);
+                        }
+                    }
+                    else typed = "";
+                    
+                    DrawReportInterface(player, 0, typed, redraw: true);
+                    break;
+
+                case "show":
+                    DrawPlayerReportReasons(player, args.GetString(1), args.GetInt(2), args.GetInt(3));
+                    break;
+
+                case "send":
+                    SendReport(player, args.GetString(1), args.GetString(2));
+                    break;
+            }
+        }
 
         #endregion
 
@@ -2084,6 +2645,9 @@ namespace Oxide.Plugins
             _CheckInfo = CheckInfo.Read();
 
             CourtApi.players = new Dictionary<ulong, CourtApi.PluginStatePlayerDto>();
+
+            _UiCommandName = "x" + Guid.NewGuid().ToString("N");
+            _UiSearchCommand = _UiCommandName + " search ";
         }
 
         private void OnServerInitialized()
@@ -2140,8 +2704,23 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            _tempDisconnectReasons.Clear();
+            _pendingKick.Clear();
+            _disconnectProcessed.Clear();
+
             RustAppEngineDestroy();
             DestroyAllUi();
+
+            _steamIdStringCache.Clear();
+
+            CourtApi.PluginServerDto.ResetCache();
+            CourtApi.CombatLogEventDto.ClearCache();
+            QueueWorker.ClearCache();
+
+            // Reset Facepunch.Pool buckets owned by this plugin: nested DTOs (Oxide.Plugins.RustApp+CourtApi+...) and generics over them (List`1[[Oxide.Plugins.RustApp+...]]).
+            Pool.Clear(Name);
+            foreach (KeyValuePair<Type, Pool.IPoolCollection> kv in Pool.Directory.Where(kv => kv.Key.FullName != null && kv.Key.FullName.Contains(Name)).ToList())
+                Pool.Directory.TryRemove(kv.Key, out _);
         }
 
         private void OnNewSave(string saveName)
@@ -2266,11 +2845,28 @@ namespace Oxide.Plugins
 
         private void CanUserLogin(string name, string id, string ipAddress)
         {
+            if (ulong.TryParse(id, out ulong userid))
+                _tempDisconnectReasons.Remove(userid);
+
+            _disconnectProcessed.Remove(id);
+
             OnPlayerConnectedNormalized(id, IPAddressWithoutPort(ipAddress));
         }
 
         private void OnPlayerConnected(BasePlayer player)
         {
+            _tempDisconnectReasons.Remove(player.userID);
+            _disconnectProcessed.Remove(player.UserIDString);
+
+            // Deferred kick: CloseConnection ran during a transition gap (e.g. between JoinedGame() and BasePlayer.Spawn()), Connection was in no list yet.
+            if (_pendingKick.Remove(player.userID, out string? pendingReason))
+            {
+                Log($"Closing connection with {player.UserIDString}: {pendingReason} (deferred → OnPlayerConnected)");
+                player.Kick(pendingReason);
+                OnPlayerDisconnectedNormalized(player.UserIDString, pendingReason);
+                return;
+            }
+
             OnPlayerConnectedNormalized(player.UserIDString, IPAddressWithoutPort(player.Connection.ipaddress));
         }
 
@@ -2280,6 +2876,9 @@ namespace Oxide.Plugins
 
         private readonly Dictionary<ulong, string> _tempDisconnectReasons = new();
 
+        // CloseConnection may run during a transition gap between Connection lists (after JoinedGame removes from joining, before BasePlayer.Spawn registers in activePlayerList).
+        private readonly Dictionary<ulong, string> _pendingKick = new();
+
         private void OnPlayerDisconnected(BasePlayer player, string reason)
         {
             OnPlayerDisconnectedNormalized(player.UserIDString, reason);
@@ -2288,6 +2887,8 @@ namespace Oxide.Plugins
         private void OnClientDisconnect(Connection connection, string reason)
         {
             _tempDisconnectReasons[connection.userid] = reason;
+
+            _pendingKick.Remove(connection.userid);
         }
 
         private void OnClientDisconnected(Connection connection, string reason)
@@ -2298,18 +2899,22 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var userid = connection.userid;
-            var reasonFinal = reason;
+            ulong userid = connection.userid;
+            string reasonFinal = reason;
 
-            if (_tempDisconnectReasons.TryGetValue(userid, out var tempReason))
+            if (_tempDisconnectReasons.TryGetValue(userid, out string? tempReason))
             {
                 reasonFinal = $"{reason}: {tempReason}";
             }
 
-            var steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : userid.ToString();
+            string? steamId = connection.player is BasePlayer basePlayer ? basePlayer.UserIDString : GetSteamIdString(userid);
             OnPlayerDisconnectedNormalized(steamId, reasonFinal);
 
-            CourtApi.players.Remove(userid);
+            if (CourtApi.players != null && CourtApi.players.TryGetValue(userid, out CourtApi.PluginStatePlayerDto? dto))
+            {
+                dto.FreePooledFields();
+                CourtApi.players.Remove(userid);
+            }
             _tempDisconnectReasons.Remove(userid);
         }
 
@@ -2319,12 +2924,17 @@ namespace Oxide.Plugins
 
         private void OnTeamKick(RelationshipManager.PlayerTeam team, BasePlayer player, ulong target)
         {
-            SetTeamChange(player.UserIDString, target.ToString());
+            SetTeamChange(player.UserIDString, GetSteamIdString(target));
         }
 
         private void OnTeamDisband(RelationshipManager.PlayerTeam team)
         {
-            team.members.ForEach(v => SetTeamChange(v.ToString(), v.ToString()));
+            List<ulong>? members = team.members;
+            for (int i = 0; i < members.Count; i++)
+            {
+                string id = GetSteamIdString(members[i]);
+                SetTeamChange(id, id);
+            }
         }
 
         private void OnTeamLeave(RelationshipManager.PlayerTeam team, BasePlayer player)
@@ -2351,7 +2961,7 @@ namespace Oxide.Plugins
             var mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(connection.userid);
             if (mute != null && mute.LeftSeconds() > 0)
             {
-                var msg = _RustApp.lang.GetMessage("System.Mute.Message.Self", _RustApp, connection.userid.ToString())
+                var msg = _RustApp.lang.GetMessage("System.Mute.Message.Self", _RustApp, GetSteamIdString(connection.userid))
                     .Replace("%REASON%", mute.reason)
                     .Replace("%TIME%", mute.GetLeftTime());
 
@@ -2398,19 +3008,15 @@ namespace Oxide.Plugins
             }
         }
 
-        private void OnPlayerChat(BasePlayer player, string message, ConVar.Chat.ChatChannel channel)
+        private void OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
         {
-            if (channel is not ConVar.Chat.ChatChannel.Team and not ConVar.Chat.ChatChannel.Global and not ConVar.Chat.ChatChannel.Local)
-            {
+            if (channel is not Chat.ChatChannel.Team and not Chat.ChatChannel.Global and not Chat.ChatChannel.Local)
                 return;
-            }
 
-            _RustAppEngine?.ChatWorker?.SaveChatMessage(new CourtApi.PluginChatMessageDto
-            {
-                steam_id = player.UserIDString,
-                is_team = channel == ConVar.Chat.ChatChannel.Team,
-                text = message
-            });
+            ChatWorker? worker = _RustAppEngine?.ChatWorker;
+            if (worker == null) return;
+
+            worker.SaveChatMessage(CourtApi.PluginChatMessageDto.Create(player.UserIDString, message, channel == Chat.ChatChannel.Team));
         }
 
         #endregion
@@ -2419,14 +3025,14 @@ namespace Oxide.Plugins
 
         private void CanAssignBed(BasePlayer player, SleepingBag bag, ulong targetPlayerId)
         {
-            _RustAppEngine?.SleepingBagWorker?.AddSleepingBag(new CourtApi.PluginSleepingBagDto
-            {
-                initiator_steam_id = player.UserIDString,
-                target_steam_id = targetPlayerId.ToString(),
+            SleepingBagWorker? worker = _RustAppEngine?.SleepingBagWorker;
+            if (worker == null) return;
 
-                position = bag.transform.position.ToString(),
-                are_friends = player.Team?.members?.Contains(targetPlayerId) ?? false
-            });
+            worker.AddSleepingBag(CourtApi.PluginSleepingBagDto.Create(
+                player.UserIDString,
+                GetSteamIdString(targetPlayerId),
+                bag.transform.position.ToString(),
+                player.Team?.members?.Contains(targetPlayerId) ?? false));
         }
 
         #endregion
@@ -2458,7 +3064,7 @@ namespace Oxide.Plugins
 
         private object RustApp_InternalQueue_HealthCheck(JObject raw)
         {
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2487,7 +3093,7 @@ namespace Oxide.Plugins
                     var target = BasePlayer.Find(mute.data.target_steam_id);
                     if (target == null)
                     {
-                        return true;
+                        return _true;
                     }
 
                     foreach (var player in BasePlayer.activePlayerList)
@@ -2502,7 +3108,7 @@ namespace Oxide.Plugins
                 _RustAppEngine?.PlayerMuteWorker?.RemovePlayerMute(mute.data);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2531,7 +3137,7 @@ namespace Oxide.Plugins
             {
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2562,7 +3168,7 @@ namespace Oxide.Plugins
 
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var player in BasePlayer.activePlayerList)
@@ -2572,7 +3178,7 @@ namespace Oxide.Plugins
                 _RustApp.SendMessage(player, msg);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2589,10 +3195,10 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskNoticeStateGetDto>();
             if (_RustAppEngine?.CheckWorker == null)
             {
-                return false;
+                return _false;
             }
 
-            return _RustAppEngine?.CheckWorker?.IsNoticeActive(data.steam_id) ?? false;
+            return (_RustAppEngine?.CheckWorker?.IsNoticeActive(data.steam_id) ?? false) ? _true : _false;
         }
 
         #endregion
@@ -2610,12 +3216,12 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskNoticeStateSetDto>();
             if (_RustAppEngine?.CheckWorker == null)
             {
-                return false;
+                return _false;
             }
 
             _RustAppEngine?.CheckWorker?.SetNoticeActive(data.steam_id, data.value);
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2668,7 +3274,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2734,17 +3340,17 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskDeleteEntityDto>();
             if (!ulong.TryParse(data.net_id, out var netIdParsed))
             {
-                return false;
+                return _false;
             }
 
             var ent = BaseNetworkable.serverEntities.Find(new NetworkableId(netIdParsed));
             if (ent == null)
             {
-                return false;
+                return _false;
             }
 
             ent.Kill();
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2777,7 +3383,7 @@ namespace Oxide.Plugins
 
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in data.targets)
@@ -2796,7 +3402,7 @@ namespace Oxide.Plugins
                 _RustApp.SoundToast(player, msg, SoundToastType.Error);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2822,14 +3428,7 @@ namespace Oxide.Plugins
         {
             var data = raw.ToObject<QueueTaskAnnounceReportProcessedDto>();
 
-            if (!_CheckInfo.LastChecks.ContainsKey(data.suspect_id))
-            {
-                _CheckInfo.LastChecks.Add(data.suspect_id, _RustApp.CurrentTime());
-            }
-            else
-            {
-                _CheckInfo.LastChecks[data.suspect_id] = _RustApp.CurrentTime();
-            }
+            _CheckInfo.LastChecks[data.suspect_id] = _RustApp.CurrentTime();
 
             Interface.Oxide.CallHook("RustApp_OnPaidAnnounceClean", data.suspect_id, data.targets);
 
@@ -2837,7 +3436,7 @@ namespace Oxide.Plugins
 
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in data.targets)
@@ -2855,7 +3454,7 @@ namespace Oxide.Plugins
                 _RustApp.SoundToast(player, msg, SoundToastType.Info);
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2873,7 +3472,7 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskCheckStartedDto>();
             if (!data.broadcast)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in BasePlayer.activePlayerList)
@@ -2881,7 +3480,7 @@ namespace Oxide.Plugins
                 SendMessage(check, lang.GetMessage("Check.Started", this, check.UserIDString).Replace("%NAME%", permission.GetUserData(data.steam_id).LastSeenNickname));
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2904,7 +3503,7 @@ namespace Oxide.Plugins
             var data = raw.ToObject<QueueTaskCheckFinishedDto>();
             if (!data.broadcast || !data.is_clear)
             {
-                return true;
+                return _true;
             }
 
             foreach (var check in BasePlayer.activePlayerList)
@@ -2912,7 +3511,7 @@ namespace Oxide.Plugins
                 SendMessage(check, lang.GetMessage("Check.FinishedClear", this, check.UserIDString).Replace("%NAME%", permission.GetUserData(data.steam_id).LastSeenNickname));
             }
 
-            return true;
+            return _true;
         }
 
         #endregion
@@ -2920,79 +3519,83 @@ namespace Oxide.Plugins
         #endregion
 
         #region Kills
-
+        
         private readonly struct HitRecord
         {
-            public readonly BasePlayer InitiatorPlayer;
+            public readonly string? InitiatorSteamId;
             public readonly string Weapon;
             public readonly float Distance;
             public readonly bool IsHeadshot;
-            public HitRecord(HitInfo info)
+
+            public HitRecord(HitInfo? info)
             {
                 if (info is null)
-                {
                     return;
-                }
 
-                InitiatorPlayer = info.InitiatorPlayer;
+                InitiatorSteamId = info.InitiatorPlayer != null ? info.InitiatorPlayer.UserIDString : null;
 
                 Distance = info.ProjectileDistance;
                 IsHeadshot = info.isHeadshot;
 
-                Weapon = GetName(info.Weapon) ?? GetName(info.WeaponPrefab) ?? "unknown";
+                Weapon = ResolveWeaponName(info);
             }
         }
 
-        private void OnPlayerWound(BasePlayer instance, HitInfo info)
+        private void OnPlayerWound(BasePlayer player, HitInfo? info)
         {
-            if (_RustAppEngine?.KillsWorker == null || info?.InitiatorPlayer is null || info.InitiatorPlayer == instance)
+            if (_RustAppEngine?.KillsWorker == null || !IsRealSteamId(player) || info?.InitiatorPlayer is null || info.InitiatorPlayer == player)
             {
                 return;
             }
 
             // Bombardir: We can't save HitInfo there as it's pooled and will be invalid after this function completes.
-            _RustAppEngine.KillsWorker.WoundedHits[instance.UserIDString] = new HitRecord(info);
+            _RustAppEngine.KillsWorker.WoundedHits[player.UserIDString] = new HitRecord(info);
         }
 
         private void OnPlayerRespawn(BasePlayer player)
         {
+            if (!IsRealSteamId(player))
+                return;
+            
             _RustAppEngine?.KillsWorker?.WoundedHits.Remove(player.UserIDString);
         }
 
-        void OnPlayerRecovered(BasePlayer player)
+        private void OnPlayerRecovered(BasePlayer player)
         {
+            if (!IsRealSteamId(player))
+                return;
+            
             _RustAppEngine?.KillsWorker?.WoundedHits.Remove(player.UserIDString);
         }
 
         private void OnPlayerDeath(BasePlayer player, HitInfo info)
         {
-            if (player is null)
+            if (!IsRealSteamId(player))
+                return;
+
+            HitRecord hitRecord = GetRealInfo(player, info);
+            string? targetId = player.UserIDString;
+            if (hitRecord.InitiatorSteamId == null || hitRecord.InitiatorSteamId == targetId)
             {
                 return;
             }
 
-            var hitRecord = GetRealInfo(player, info);
-            if (hitRecord.InitiatorPlayer is null || player == hitRecord.InitiatorPlayer)
-            {
-                return;
-            }
-
-            var playerUserId = player.userID.Get();
-            var targetId = player.UserIDString;
+            ulong playerUserId = player.userID.Get();
 
             NextFrame(() =>
             {
-                var log = GetCorrectCombatlog(playerUserId);
-                _RustAppEngine?.KillsWorker?.AddKill(new CourtApi.PluginKillEntryDto
-                {
-                    initiator_steam_id = hitRecord.InitiatorPlayer.UserIDString,
-                    target_steam_id = targetId,
-                    distance = hitRecord.Distance,
-                    game_time = Env.time.ToTimeSpan().ToShortString(),
-                    hit_history = log,
-                    is_headshot = hitRecord.IsHeadshot,
-                    weapon = hitRecord.Weapon
-                });
+                KillsWorker? worker = _RustAppEngine?.KillsWorker;
+                if (worker == null) return;
+
+                List<CourtApi.CombatLogEventDto> log = GetCorrectCombatlog(playerUserId);
+                worker.AddKill(CourtApi.PluginKillEntryDto.Create(
+                    hitRecord.InitiatorSteamId,
+                    targetId,
+                    Env.time.ToTimeSpan().ToShortString(),
+                    hitRecord.Distance,
+                    hitRecord.Weapon,
+                    hitRecord.IsHeadshot,
+                    log));
             });
         }
 
@@ -3001,249 +3604,262 @@ namespace Oxide.Plugins
         #endregion
 
         #region Interface
-
+        
         private const string ReportLayer = "UI_RP_ReportPanelUI";
+        private const string CheckLayer = "RP_PrivateLayer";
 
         private void DrawReportInterface(BasePlayer player, int page = 0, string search = "", bool redraw = false)
         {
-            var lineAmount = 6;
-            var lineMargin = 8;
-
-            var size = (float)(700 - lineMargin * lineAmount) / lineAmount;
-
-            var list = BasePlayer.activePlayerList
-                .ToList();
-
-            var finalList = list
-                .FindAll(v => v.displayName.ToLower().Contains(search) || v.UserIDString.ToLower().Contains(search) || search == null);
-
-            finalList = finalList
-                .Skip(page * 18)
-                .Take(18)
-                .ToList();
-
-            if (finalList.Count() == 0)
+            const int ColumnCount = 6;
+            const int PageSize = 18;
+            const int MinRows = 3;
+            const int LineMargin = 8;
+            const float size = (float)(700 - LineMargin * ColumnCount) / ColumnCount;
+            
+            bool hasSearch = !string.IsNullOrEmpty(search);
+            List<BasePlayer> filtered = Pool.Get<List<BasePlayer>>();
+            try
             {
-                if (search == null)
+                ListHashSet<BasePlayer>? src = BasePlayer.activePlayerList;
+                if (!hasSearch)
+                {
+                    for (int i = 0; i < src.Count; i++) filtered.Add(src[i]);
+                }
+                else
+                {
+                    for (int i = 0; i < src.Count; i++)
+                    {
+                        BasePlayer? p = src[i];
+                        if (p.displayName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                         || p.UserIDString.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                            filtered.Add(p);
+                    }
+                }
+
+                int total = filtered.Count;
+                int start = page * PageSize;
+                int end = Math.Min(start + PageSize, total);
+                int shown = Math.Max(0, end - start);
+
+                if (shown == 0 && !hasSearch && page > 0)
                 {
                     DrawReportInterface(player, page - 1);
                     return;
                 }
-            }
 
-            CuiElementContainer container = new CuiElementContainer();
+                bool hasNextPage = total > end;
+                bool hasPrevPage = page > 0;
 
-            if (!redraw)
-            {
+                double nowTs = CurrentTime();
+                double checkExpireSeconds = _Settings.report_ui_show_check_in * 24 * 60 * 60;
+
+                CuiElementContainer container = new CuiElementContainer();
+
+                if (!redraw)
+                {
+                    container.Add(new CuiPanel
+                    {
+                        CursorEnabled = true,
+                        RectTransform = { OffsetMax = "0 0" },
+                        Image = { Color = "0 0 0 0.8", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
+                    }, "Overlay", ReportLayer, ReportLayer);
+                    
+                    container.Add(new CuiButton()
+                    {
+                        RectTransform = { OffsetMax = "0 0" },
+                        Button = { Color = "0.20 0.20 0.20 1.00", Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Close = ReportLayer },
+                        Text = { Text = "" }
+                    }, ReportLayer);
+                }
+
                 container.Add(new CuiPanel
                 {
-                    CursorEnabled = true,
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                    Image = { Color = "0 0 0 0.8", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
-                }, "Overlay", ReportLayer, ReportLayer);
+                    RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-368 -200", OffsetMax = "368 142" },
+                    Image = { Color = "1 0 0 0" }
+                }, ReportLayer, ReportLayer + ".C", ReportLayer + ".C");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "1 0", OffsetMin = "-36 0", OffsetMax = "0 0" },
+                    Image = { Color = "0 0 1 0" }
+                }, ReportLayer + ".C", ReportLayer + ".R");
+
+                int nextPageNum = hasNextPage ? page + 1 : page;
+                int prevPageNum = hasPrevPage ? page - 1 : 0;
 
                 container.Add(new CuiButton()
                 {
-                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
-                    Button = { Color = HexToRustFormat("#343434"), Sprite = "assets/content/ui/ui.background.transparent.radial.psd", Close = ReportLayer },
-                    Text = { Text = "" }
-                }, ReportLayer);
-            }
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.5", OffsetMin = "0 0", OffsetMax = "0 -4" },
+                    Button = {
+                      Color = hasNextPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
+                      Command = ZString.Format("{0} page {1} {2}", _UiCommandName, nextPageNum, search)
+                    },
+                    Text = { Text = "↓", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasNextPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
+                }, ReportLayer + ".R", ReportLayer + ".RD");
 
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0.5 0.5", AnchorMax = "0.5 0.5", OffsetMin = "-368 -200", OffsetMax = "368 142" },
-                Image = { Color = "1 0 0 0" }
-            }, ReportLayer, ReportLayer + ".C", ReportLayer + ".C");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 1", OffsetMin = "-36 0", OffsetMax = "0 0" },
-                Image = { Color = "0 0 1 0" }
-            }, ReportLayer + ".C", ReportLayer + ".R");
-
-            container.Add(new CuiButton()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 0.5", OffsetMin = "0 0", OffsetMax = "0 -4" },
-                Button = {
-          Color = HexToRustFormat($"#{(list.Count > 18 && finalList.Count() == 18 ? "D0C6BD4D" : "D0C6BD33")}"),
-          Command = UICommand((player, args, input) => {
-            DrawReportInterface(player, args.page, args.search, true);
-
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
-          }, new { search = search, page = list.Count > 18 && finalList.Count() == 18 ? page + 1 : page }, "nextPageGo")
-        },
-                Text = { Text = "↓", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 24, Color = HexToRustFormat($"{(list.Count > 18 && finalList.Count() == 18 ? "D0C6BD" : "D0C6BD4D")}") }
-            }, ReportLayer + ".R", ReportLayer + ".RD");
-
-            container.Add(new CuiButton()
-            {
-                RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = "0 4", OffsetMax = "0 0" },
-                Button = {
-          Color = HexToRustFormat($"#{(page == 0 ? "D0C6BD33" : "D0C6BD4D")}"),
-          Command = UICommand((player, args, input) => {
-            DrawReportInterface(player, args.page, args.search, true);
-
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
-          }, new { search = search, page = page == 0 ? 0 : page - 1 }, "prevPageGo")
-        },
-                Text = { Text = "↑", Align = TextAnchor.MiddleCenter, Font = "robotocondensed-bold.ttf", FontSize = 24, Color = HexToRustFormat($"{(page == 0 ? "D0C6BD4D" : "D0C6BD")}") }
-            }, ReportLayer + ".R", ReportLayer + ".RU");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "1 1", AnchorMax = "1 1", OffsetMin = "-250 8", OffsetMax = "0 43" },
-                Image = { Color = HexToRustFormat("#D0C6BD33") }
-            }, ReportLayer + ".C", ReportLayer + ".S");
-
-            var searchCommand = UICommand((player, args, input) =>
-            {
-                DrawReportInterface(player, 0, input, true);
-            }, new { }, "searchForPlayer");
-
-            container.Add(new CuiElement
-            {
-                Parent = ReportLayer + ".S",
-                Components =
-          {
-              new CuiInputFieldComponent {
-                Text = $"{lang.GetMessage("Header.Search.Placeholder", this, player.UserIDString)}",
-                FontSize = 14,
-                Font = "robotocondensed-regular.ttf",
-                Color = HexToRustFormat("#D0C6BD80"),
-                Align = TextAnchor.MiddleLeft,
-                Command = searchCommand,
-                NeedsKeyboard = true
-              },
-              new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "10 0", OffsetMax = "-85 0"}
-          }
-            });
-
-            container.Add(new CuiButton
-            {
-                RectTransform = { AnchorMin = "1 0", AnchorMax = "1 1", OffsetMin = "-75 0", OffsetMax = "0 0" },
-                Button = { Color = HexToRustFormat("#D0C6BD"), Material = "assets/icons/greyout.mat" },
-                Text = { Text = $"{lang.GetMessage("Header.Search", this, player.UserIDString)}", Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#443F3B"), FontSize = 14, Align = TextAnchor.MiddleCenter }
-            }, ReportLayer + ".S", ReportLayer + ".SB");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0 1", AnchorMax = "0.5 1", OffsetMin = "0 7", OffsetMax = "0 47" },
-                Image = { Color = "0.8 0.8 0.8 0" }
-            }, ReportLayer + ".C", ReportLayer + ".LT");
-
-            container.Add(new CuiLabel()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                Text = { Text = $"{lang.GetMessage("Header.Find", this, player.UserIDString)} {(search != null && search.Length > 0 ? $"- {(search.Length > 20 ? search.Substring(0, 14).ToUpper() + "..." : search.ToUpper())}" : "")}", Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#D0C6BD"), FontSize = 24, Align = TextAnchor.UpperLeft }
-            }, ReportLayer + ".LT");
-
-            container.Add(new CuiLabel()
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                Text = { Text = search == null || search.Length == 0 ? lang.GetMessage("Header.SubDefault", this, player.UserIDString) : finalList.Count() == 0 ? lang.GetMessage("Header.SubFindEmpty", this, player.UserIDString) : lang.GetMessage("Header.SubFindResults", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = HexToRustFormat("#D0C6BD4D"), FontSize = 14, Align = TextAnchor.LowerLeft }
-            }, ReportLayer + ".LT");
-
-            container.Add(new CuiPanel
-            {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "-40 0" },
-                Image = { Color = "0 1 0 0" }
-            }, ReportLayer + ".C", ReportLayer + ".L");
-
-            for (var y = 0; y < Math.Max((int)Math.Ceiling((float)finalList.Count / lineAmount), 3); y++)
-            {
-                for (var x = 0; x < 6; x++)
+                container.Add(new CuiButton()
                 {
-                    var target = finalList.ElementAtOrDefault(y * 6 + x);
-                    if (target)
+                    RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = "0 4", OffsetMax = "0 0" },
+                    Button = {
+                      Color = hasPrevPage ? "0.816 0.776 0.741 0.3" : "0.816 0.776 0.741 0.2",
+                      Command = ZString.Format("{0} page {1} {2}", _UiCommandName, prevPageNum, search)
+                    },
+                    Text = { Text = "↑", Align = TextAnchor.MiddleCenter, FontSize = 24, Color = hasPrevPage ? "0.816 0.776 0.741" : "0.816 0.776 0.741 0.3" }
+                }, ReportLayer + ".R", ReportLayer + ".RU");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "1 1", OffsetMin = "-250 8", OffsetMax = "0 43" },
+                    Image = { Color = "0.816 0.776 0.741 0.2" }
+                }, ReportLayer + ".C", ReportLayer + ".S");
+
+                string searchCommand = _UiSearchCommand;
+
+                container.Add(new CuiElement
+                {
+                    Parent = ReportLayer + ".S",
+                    Components =
                     {
-                        container.Add(new CuiPanel
+                        new CuiInputFieldComponent {
+                            Text = $"{lang.GetMessage("Header.Search.Placeholder", this, player.UserIDString)}",
+                            FontSize = 14,
+                            Font = "robotocondensed-regular.ttf",
+                            Color = "0.816 0.776 0.741 0.5",
+                            Align = TextAnchor.MiddleLeft,
+                            Command = searchCommand,
+                            NeedsKeyboard = true
+                        },
+                        new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "10 0", OffsetMax = "-85 0"}
+                    }
+                });
+
+                container.Add(new CuiButton
+                {
+                    RectTransform = { AnchorMin = "1 0", OffsetMin = "-75 0", OffsetMax = "0 0" },
+                    Button = { Color = "0.816 0.776 0.741", Material = "assets/icons/greyout.mat" },
+                    Text = { Text = $"{lang.GetMessage("Header.Search", this, player.UserIDString)}", Color = "0.267 0.247 0.231", Align = TextAnchor.MiddleCenter }
+                }, ReportLayer + ".S", ReportLayer + ".SB");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { AnchorMin = "0 1", AnchorMax = "0.5 1", OffsetMin = "0 7", OffsetMax = "0 47" },
+                    Image = { Color = "0.8 0.8 0.8 0" }
+                }, ReportLayer + ".C", ReportLayer + ".LT");
+
+                container.Add(new CuiLabel()
+                {
+                    RectTransform = { OffsetMax = "0 0" },
+                    Text = { Text = $"{lang.GetMessage("Header.Find", this, player.UserIDString)} {(hasSearch ? $"- {(search.Length > 20 ? search.Substring(0, 14).ToUpper() + "..." : search.ToUpper())}" : "")}", Color = "0.816 0.776 0.741", FontSize = 24, Align = TextAnchor.UpperLeft }
+                }, ReportLayer + ".LT");
+
+                container.Add(new CuiLabel()
+                {
+                    RectTransform = { OffsetMax = "0 0" },
+                    Text = { Text = !hasSearch ? lang.GetMessage("Header.SubDefault", this, player.UserIDString) : total == 0 ? lang.GetMessage("Header.SubFindEmpty", this, player.UserIDString) : lang.GetMessage("Header.SubFindResults", this, player.UserIDString), Font = "robotocondensed-regular.ttf", Color = "0.816 0.776 0.741 0.3", Align = TextAnchor.LowerLeft }
+                }, ReportLayer + ".LT");
+
+                container.Add(new CuiPanel
+                {
+                    RectTransform = { OffsetMax = "-40 0" },
+                    Image = { Color = "0 1 0 0" }
+                }, ReportLayer + ".C", ReportLayer + ".L");
+
+                int rowCount = Math.Max((shown + ColumnCount - 1) / ColumnCount, MinRows);
+                for (int y = 0; y < rowCount; y++)
+                {
+                    for (int x = 0; x < ColumnCount; x++)
+                    {
+                        int idx = start + y * ColumnCount + x;
+                        BasePlayer? target = idx < end ? filtered[idx] : null;
+
+                        if (target != null)
                         {
-                            RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}", OffsetMax = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}" },
-                            Image = { Color = HexToRustFormat("#D0C6BD33") }
-                        }, ReportLayer + ".L", ReportLayer + $".{target.UserIDString}");
+                            string? targetId = target.UserIDString;
 
-                        container.Add(new CuiElement
-                        {
-                            Parent = ReportLayer + $".{target.UserIDString}",
-                            Components =
-              {
-                // Do not change in devblogs
-                new CuiRawImageComponent { SteamId= target.UserIDString, Sprite = "assets/icons/loading.png" },
-                new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
-              }
-                        });
-
-                        container.Add(new CuiPanel()
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                            Image = { Sprite = "assets/content/ui/ui.background.transparent.linear.psd", Color = HexToRustFormat("#282828f2") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        string normaliseName = NormalizeString(target.displayName);
-
-                        string name = normaliseName.Length > 14 ? normaliseName.Substring(0, 15) + ".." : normaliseName;
-
-                        container.Add(new CuiLabel
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "6 16", OffsetMax = "0 0" },
-                            Text = { Text = name, Align = TextAnchor.LowerLeft, Font = "robotocondensed-bold.ttf", FontSize = 13, Color = HexToRustFormat("#D0C6BD") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        container.Add(new CuiLabel
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "6 5", OffsetMax = "0 0" },
-                            Text = { Text = target.UserIDString, Align = TextAnchor.LowerLeft, Font = "robotocondensed-regular.ttf", FontSize = 10, Color = HexToRustFormat("#D0C6BD80") }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        var min = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}";
-                        var max = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}";
-
-                        var showPlayerCommand = UICommand((player, args, input) =>
-                        {
-                            DrawPlayerReportReasons(player, args.steam_id, args.min, args.max, args.left);
-                        }, new { steam_id = target.UserIDString, min, max, left = x >= 3 }, "showPlayerReportReasons");
-
-                        container.Add(new CuiButton()
-                        {
-                            RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                            Button = { Color = "0 0 0 0", Command = showPlayerCommand },
-                            Text = { Text = "" }
-                        }, ReportLayer + $".{target.UserIDString}");
-
-                        var was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
-                        if (was_checked)
-                        {
                             container.Add(new CuiPanel
                             {
-                                RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
-                                Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
-                            }, ReportLayer + $".{target.UserIDString}", ReportLayer + $".{target.UserIDString}.Recent");
+                                RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}", OffsetMax = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}" },
+                                Image = { Color = "0.816 0.776 0.741 0.2" }
+                            }, ReportLayer + ".L", ReportLayer + $".{targetId}");
+
+                            container.Add(new CuiElement
+                            {
+                                Parent = ReportLayer + $".{targetId}",
+                                Components =
+                                {
+                                    // Do not change in devblogs
+                                    new CuiRawImageComponent { SteamId = targetId, Sprite = "assets/icons/loading.png" },
+                                    new CuiRectTransformComponent { OffsetMax = "0 0" }
+                                }
+                            });
+
+                            container.Add(new CuiPanel()
+                            {
+                                RectTransform = { OffsetMax = "0 0" },
+                                Image = { Sprite = "assets/content/ui/ui.background.transparent.linear.psd", Color = "0.157 0.157 0.157 0.95" }
+                            }, ReportLayer + $".{targetId}");
+
+                            string normaliseName = NormalizeString(target.displayName);
+                            string name = normaliseName.Length > 14 ? normaliseName.Substring(0, 15) + ".." : normaliseName;
 
                             container.Add(new CuiLabel
                             {
-                                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
-                                Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
-                            }, ReportLayer + $".{target.UserIDString}.Recent");
+                                RectTransform = { OffsetMin = "6 16", OffsetMax = "0 0" },
+                                Text = { Text = name, Align = TextAnchor.LowerLeft, FontSize = 13, Color = "0.816 0.776 0.741" }
+                            }, ReportLayer + $".{targetId}");
+
+                            container.Add(new CuiLabel
+                            {
+                                RectTransform = { OffsetMin = "6 5", OffsetMax = "0 0" },
+                                Text = { Text = targetId, Align = TextAnchor.LowerLeft, Font = "robotocondensed-regular.ttf", FontSize = 10, Color = "0.816 0.776 0.741 0.5" }
+                            }, ReportLayer + $".{targetId}");
+
+                            string showPlayerCommand = ZString.Format("{0} show {1} {2} {3}", _UiCommandName, targetId, x, y);
+
+                            container.Add(new CuiButton()
+                            {
+                                RectTransform = { OffsetMax = "0 0" },
+                                Button = { Color = "0 0 0 0", Command = showPlayerCommand },
+                                Text = { Text = "" }
+                            }, ReportLayer + $".{targetId}");
+
+                            bool wasChecked = _CheckInfo.LastChecks.TryGetValue(targetId, out double lastCheck)
+                                              && nowTs - lastCheck < checkExpireSeconds;
+                            if (wasChecked)
+                            {
+                                container.Add(new CuiPanel
+                                {
+                                    RectTransform = { AnchorMin = "0 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
+                                    Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
+                                }, ReportLayer + $".{targetId}", ReportLayer + $".{targetId}.Recent");
+
+                                container.Add(new CuiLabel
+                                {
+                                    RectTransform = { OffsetMax = "0 0" },
+                                    Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
+                                }, ReportLayer + $".{targetId}.Recent");
+                            }
+                        }
+                        else
+                        {
+                            container.Add(new CuiPanel
+                            {
+                                RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + LineMargin * x} -{(y + 1) * size + LineMargin * y}", OffsetMax = $"{(x + 1) * size + LineMargin * x} -{y * size + LineMargin * y}" },
+                                Image = { Color = "0.816 0.776 0.741 0.2" }
+                            }, ReportLayer + ".L");
                         }
                     }
-                    else
-                    {
-                        container.Add(new CuiPanel
-                        {
-                            RectTransform = { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x * size + lineMargin * x} -{(y + 1) * size + lineMargin * y}", OffsetMax = $"{(x + 1) * size + lineMargin * x} -{y * size + lineMargin * y}" },
-                            Image = { Color = HexToRustFormat("#D0C6BD33") }
-                        }, ReportLayer + ".L");
-                    }
                 }
-            }
 
-            CuiHelper.AddUi(player, container);
+                CuiHelper.AddUi(player, container);
+            }
+            finally
+            {
+                Pool.FreeUnmanaged(ref filtered);
+            }
         }
 
-        private void DrawPlayerReportReasons(BasePlayer player, string targetId, string min, string max, bool leftAlign)
+        private void DrawPlayerReportReasons(BasePlayer player, string targetId, int gridX, int gridY)
         {
             BasePlayer target = BasePlayer.Find(targetId) ?? BasePlayer.FindSleeping(targetId);
             if (target == null)
@@ -3252,8 +3868,15 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Effect effect = new Effect("assets/prefabs/tools/detonator/effects/unpress.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxButtonUnpress);
+
+            const int ColumnCount = 6;
+            const int LineMargin = 8;
+            const float size = (float)(700 - LineMargin * ColumnCount) / ColumnCount;
+
+            string min = $"{gridX * size + LineMargin * gridX} -{(gridY + 1) * size + LineMargin * gridY}";
+            string max = $"{(gridX + 1) * size + LineMargin * gridX} -{gridY * size + LineMargin * gridY}";
+            bool leftAlign = gridX >= 3;
 
             CuiElementContainer container = new CuiElementContainer();
             CuiHelper.DestroyUi(player, ReportLayer + $".T");
@@ -3267,7 +3890,7 @@ namespace Oxide.Plugins
 
             container.Add(new CuiButton()
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
+                RectTransform = { OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
                 Button = { Close = $"{ReportLayer}.T", Color = "0 0 0 1", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
             }, ReportLayer + $".T");
 
@@ -3275,12 +3898,12 @@ namespace Oxide.Plugins
             container.Add(new CuiButton()
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? -1 : 2)} 0", AnchorMax = $"{(leftAlign ? -2 : 3)} 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
-                Button = { Close = $"{ReportLayer}.T", Color = HexToRustFormat("#343434"), Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
+                Button = { Close = $"{ReportLayer}.T", Color = "0.204 0.204 0.204", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" }
             }, ReportLayer + $".T");
 
             container.Add(new CuiButton()
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = $"-1111111 -1111111", OffsetMax = $"1111111 1111111" },
+                RectTransform = { AnchorMax = "1 1", OffsetMin = $"-1111111 -1111111", OffsetMax = $"1111111 1111111" },
                 Button = { Close = $"{ReportLayer}.T", Color = "0 0 0 0.5", Material = "assets/content/ui/uibackgroundblur-ingamemenu.mat" }
             }, ReportLayer + $".T");
 
@@ -3288,13 +3911,13 @@ namespace Oxide.Plugins
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? "0" : "1")} 0", AnchorMax = $"{(leftAlign ? "0" : "1")} 1", OffsetMin = $"{(leftAlign ? "-350" : "20")} 0", OffsetMax = $"{(leftAlign ? "-20" : "350")} -5" },
-                Text = { FadeIn = 0.4f, Text = lang.GetMessage("Subject.Head", this, player.UserIDString), Font = "robotocondensed-bold.ttf", Color = HexToRustFormat("#D0C6BD"), FontSize = 24, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
+                Text = { FadeIn = 0.4f, Text = lang.GetMessage("Subject.Head", this, player.UserIDString), Color = "0.816 0.776 0.741", FontSize = 24, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
             }, ReportLayer + ".T");
 
             container.Add(new CuiLabel
             {
                 RectTransform = { AnchorMin = $"{(leftAlign ? "0" : "1")} 0", AnchorMax = $"{(leftAlign ? "0" : "1")} 1", OffsetMin = $"{(leftAlign ? "-250" : "20")} 0", OffsetMax = $"{(leftAlign ? "-20" : "250")} -35" },
-                Text = { FadeIn = 0.4f, Text = $"{lang.GetMessage("Subject.SubHead", this, player.UserIDString).Replace("%PLAYER%", $"<b>{target.displayName}</b>")}", Font = "robotocondensed-regular.ttf", Color = HexToRustFormat("#D0C6BD80"), FontSize = 14, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
+                Text = { FadeIn = 0.4f, Text = $"{lang.GetMessage("Subject.SubHead", this, player.UserIDString).Replace("%PLAYER%", $"<b>{target.displayName}</b>")}", Font = "robotocondensed-regular.ttf", Color = "0.816 0.776 0.741 0.5", FontSize = 14, Align = leftAlign ? TextAnchor.UpperRight : TextAnchor.UpperLeft }
             }, ReportLayer + ".T");
 
             container.Add(new CuiElement
@@ -3303,24 +3926,25 @@ namespace Oxide.Plugins
                 Components = {
                     // Do not change in devblogs
                     new CuiRawImageComponent { SteamId = target.UserIDString, Sprite = "assets/icons/loading.png" },
-                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" }
+                    new CuiRectTransformComponent { OffsetMax = "0 0" }
                 }
             });
 
             try
             {
-                var was_checked = _CheckInfo.LastChecks.ContainsKey(target.UserIDString) && CurrentTime() - _CheckInfo.LastChecks[target.UserIDString] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+                bool was_checked = _CheckInfo.LastChecks.TryGetValue(target.UserIDString, out var lastCheck)
+                                   && CurrentTime() - lastCheck < _Settings.report_ui_show_check_in * 24 * 60 * 60;
                 if (was_checked)
                 {
                     container.Add(new CuiPanel
                     {
-                        RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
+                        RectTransform = { AnchorMin = "0 1", OffsetMin = "5 -25", OffsetMax = "-5 -5" },
                         Image = { Color = "0.239 0.568 0.294 1", Material = "assets/icons/greyout.mat" },
                     }, ReportLayer + $".T", ReportLayer + $".T.Recent");
 
                     container.Add(new CuiLabel
                     {
-                        RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMin = "0 0", OffsetMax = "0 0" },
+                        RectTransform = { OffsetMax = "0 0" },
                         Text = { Text = lang.GetMessage("UI.CheckMark", this, player.UserIDString), Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 12, Color = "0.639 0.968 0.694 1" }
                     }, ReportLayer + $".T.Recent");
                 }
@@ -3332,21 +3956,18 @@ namespace Oxide.Plugins
 
             try
             {
-                for (var i = 0; i < _Settings.report_ui_reasons.Count; i++)
+                for (int i = 0; i < _Settings.report_ui_reasons.Count; i++)
                 {
-                    var offXMin = (20 + (i * 5)) + i * 80;
-                    var offXMax = 20 + (i * 5) + (i + 1) * 80;
+                    int offXMin = (20 + (i * 5)) + i * 80;
+                    int offXMax = 20 + (i * 5) + (i + 1) * 80;
 
-                    var sendReportCommand = UICommand((player, args, input) =>
-                    {
-                        SendReport(player, args.target_id, args.reason);
-                    }, new { target_id = target.UserIDString, reason = _Settings.report_ui_reasons[i] }, "sendReportToPlayer");
+                    string sendReportCommand = ZString.Format("{0} send {1} {2}", _UiCommandName, target.UserIDString, _Settings.report_ui_reasons[i]);
 
                     container.Add(new CuiButton()
                     {
                         RectTransform = { AnchorMin = $"{(leftAlign ? 0 : 1)} 0", AnchorMax = $"{(leftAlign ? 0 : 1)} 0", OffsetMin = $"{(leftAlign ? -offXMax : offXMin)} 15", OffsetMax = $"{(leftAlign ? -offXMin : offXMax)} 45" },
-                        Button = { FadeIn = 0.4f + i * 0.2f, Color = HexToRustFormat("#D0C6BD4D"), Command = sendReportCommand },
-                        Text = { FadeIn = 0.4f + i * 0.2f, Text = $"{_Settings.report_ui_reasons[i]}", Align = TextAnchor.MiddleCenter, Color = HexToRustFormat("#D0C6BD"), Font = "robotocondensed-bold.ttf", FontSize = 16 }
+                        Button = { FadeIn = 0.4f + i * 0.2f, Color = "0.816 0.776 0.741 0.3", Command = sendReportCommand },
+                        Text = { FadeIn = 0.4f + i * 0.2f, Text = $"{_Settings.report_ui_reasons[i]}", Align = TextAnchor.MiddleCenter, Color = "0.816 0.776 0.741",  FontSize = 16 }
                     }, ReportLayer + $".T");
                 }
             }
@@ -3357,10 +3978,7 @@ namespace Oxide.Plugins
 
             CuiHelper.AddUi(player, container);
         }
-
-
-        private const string CheckLayer = "RP_PrivateLayer";
-
+        
         private void DrawNoticeInterface(BasePlayer player)
         {
             CuiHelper.DestroyUi(player, CheckLayer);
@@ -3368,8 +3986,8 @@ namespace Oxide.Plugins
 
             container.Add(new CuiButton
             {
-                RectTransform = { AnchorMin = "0 0.5", AnchorMax = "1 1", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
-                Button = { Color = HexToRustFormat("#1C1C1C"), Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" },
+                RectTransform = { AnchorMin = "0 0.5", OffsetMin = $"-500 -500", OffsetMax = $"500 500" },
+                Button = { Color = "0.11 0.11 0.11", Sprite = "assets/content/ui/gameui/attackheli/compass/ui.soft.radial.png" },
                 Text = { Text = "", Align = TextAnchor.MiddleCenter }
             }, "Under", CheckLayer);
 
@@ -3377,23 +3995,61 @@ namespace Oxide.Plugins
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1", OffsetMax = "0 0" },
+                RectTransform = { OffsetMax = "0 0" },
                 Text = { Text = text, Align = TextAnchor.MiddleCenter, Font = "robotocondensed-regular.ttf", FontSize = 16 }
             }, CheckLayer);
 
             CuiHelper.AddUi(player, container);
 
-            Effect effect = new Effect("ASSETS/BUNDLED/PREFABS/FX/INVITE_NOTICE.PREFAB".ToLower(), player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxInviteNotice);
         }
 
         #endregion
 
         #region Methods
-
-        private static string GetName(UnityEngine.Object obj)
+        
+        private static string ResolveWeaponName(HitInfo? info)
         {
-            return obj == null ? null : obj?.name;
+            if (info == null) return "unknown";
+
+            Item? item = info.Weapon != null ? info.Weapon.GetItem() : null;
+            string? itemShortname = item?.info?.shortname;
+            if (!string.IsNullOrEmpty(itemShortname))
+                return itemShortname!;
+
+            string? weaponPrefabShort = info.WeaponPrefab != null ? info.WeaponPrefab.ShortPrefabName : null;
+            if (!string.IsNullOrEmpty(weaponPrefabShort))
+                return StripWeaponSuffixes(weaponPrefabShort!);
+
+            if (info.ProjectilePrefab != null && !string.IsNullOrEmpty(info.ProjectilePrefab.name))
+                return StripWeaponSuffixes(info.ProjectilePrefab.name);
+
+            if (info.Initiator != null && !string.IsNullOrEmpty(info.Initiator.ShortPrefabName))
+                return StripWeaponSuffixes(info.Initiator.ShortPrefabName);
+
+            if (info.damageTypes != null)
+            {
+                DamageType dt = info.damageTypes.GetMajorityDamageType();
+                if (dt != DamageType.Generic)
+                    return dt.ToString().ToLowerInvariant();
+            }
+
+            return "unknown";
+        }
+        
+        private static string StripWeaponSuffixes(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+
+            const string SuffixEntity = ".entity";
+            const string SuffixDeployed = ".deployed";
+
+            if (name.EndsWith(SuffixDeployed, StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - SuffixDeployed.Length);
+            if (name.EndsWith(SuffixEntity, StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - SuffixEntity.Length);
+
+            return name;
         }
 
         private static List<CourtApi.CombatLogEventDto> GetCorrectCombatlog(ulong target)
@@ -3401,50 +4057,53 @@ namespace Oxide.Plugins
             const int THRESHOLD_STREAK = 20;
             const int THRESHOLD_MAX_LIMIT = 30;
 
-            var allCombatlogs = CombatLog.Get(target);
+            Queue<CombatLog.Event>? allCombatlogs = CombatLog.Get(target);
 
             if (allCombatlogs == null || allCombatlogs.Count == 0)
-            {
                 return null;
-            }
+            
 
-            var logsList = Pool.Get<List<CombatLog.Event>>();
+            List<CombatLog.Event>? logsList = Pool.Get<List<CombatLog.Event>>();
+            Dictionary<ulong, string>? idCache = Pool.Get<Dictionary<ulong, string>>();
 
-            logsList.AddRange(allCombatlogs);
-
-            var logsLastIndex = logsList.Count - 1;
-            var killLog = logsList[logsLastIndex];
-
-            var container = new List<CourtApi.CombatLogEventDto>(8)
+            try
             {
-                new(killLog.time, killLog)
-            };
+                logsList.AddRange(allCombatlogs);
 
-            for (var i = logsLastIndex - 1; i >= 0; i--)
-            {
-                var ev = logsList[i];
+                int logsLastIndex = logsList.Count - 1;
+                CombatLog.Event killLog = logsList[logsLastIndex];
+                
+                List<CourtApi.CombatLogEventDto>? container = Pool.Get<List<CourtApi.CombatLogEventDto>>();
+                container.Add(CourtApi.CombatLogEventDto.Create(killLog.time, killLog, idCache));
 
-                if (ev.target != "player" && ev.target != "you")
+                for (int i = logsLastIndex - 1; i >= 0; i--)
                 {
-                    continue;
+                    CombatLog.Event ev = logsList[i];
+
+                    if (ev.target != "player" && ev.target != "you")
+                        continue;
+
+                    if (ev.info == "killed")
+                        break;
+
+                    float timeSincePreviousEvent = ev.time - logsList[i + 1].time;
+                    if (timeSincePreviousEvent > THRESHOLD_STREAK)
+                        break;
+
+                    float timeSinceEvent = killLog.time - ev.time;
+                    if (timeSinceEvent > THRESHOLD_MAX_LIMIT)
+                        break;
+
+                    container.Add(CourtApi.CombatLogEventDto.Create(killLog.time, ev, idCache));
                 }
 
-                if (ev.info == "killed")
-                    break;
-
-                var timeSincePreviousEvent = ev.time - logsList[i + 1].time;
-                if (timeSincePreviousEvent > THRESHOLD_STREAK)
-                    break;
-
-                var timeSinceEvent = killLog.time - ev.time;
-                if (timeSinceEvent > THRESHOLD_MAX_LIMIT)
-                    break;
-
-                container.Add(new CourtApi.CombatLogEventDto(killLog.time, ev));
+                return container;
             }
-
-            Pool.FreeUnmanaged(ref logsList);
-            return container;
+            finally
+            {
+                Pool.FreeUnmanaged(ref logsList);
+                Pool.FreeUnmanaged(ref idCache);
+            }
         }
 
         private HitRecord GetRealInfo(BasePlayer player, HitInfo info)
@@ -3482,15 +4141,13 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (!_RustAppEngine.ReportWorker.ReportCooldowns.ContainsKey(initiator.userID))
-            {
-                _RustAppEngine.ReportWorker.ReportCooldowns.Add(initiator.userID, 0);
-            }
+            var cooldowns = _RustAppEngine.ReportWorker.ReportCooldowns;
+            var now = CurrentTime();
 
-            if (_RustAppEngine.ReportWorker.ReportCooldowns[initiator.userID] > CurrentTime())
+            if (cooldowns.TryGetValue(initiator.userID, out var until) && until > now)
             {
-                var msg = lang.GetMessage("Cooldown", this, initiator.UserIDString).Replace("%TIME%",
-                    $"{(_RustAppEngine.ReportWorker.ReportCooldowns[initiator.userID] - CurrentTime()).ToString("0")}");
+                var msg = lang.GetMessage("Cooldown", this, initiator.UserIDString)
+                    .Replace("%TIME%", $"{(until - now).ToString("0")}");
 
                 SoundToast(initiator, msg, SoundToastType.Error);
                 return;
@@ -3502,12 +4159,7 @@ namespace Oxide.Plugins
 
             SoundToast(initiator, lang.GetMessage("Sent", this, initiator.UserIDString), SoundToastType.Info);
 
-            if (!_RustAppEngine.ReportWorker.ReportCooldowns.ContainsKey(initiator.userID))
-            {
-                _RustAppEngine.ReportWorker.ReportCooldowns.Add(initiator.userID, 0);
-            }
-
-            _RustAppEngine.ReportWorker.ReportCooldowns[initiator.userID] = CurrentTime() + _Settings.report_ui_cooldown;
+            cooldowns[initiator.userID] = now + _Settings.report_ui_cooldown;
         }
 
         private void OnPlayerConnectedNormalized(string steamId, string ip)
@@ -3515,8 +4167,13 @@ namespace Oxide.Plugins
             _RustAppEngine?.BanWorker?.CheckBans(steamId, ip);
         }
 
+        private static readonly HashSet<string> _disconnectProcessed = new();
+
         private static void OnPlayerDisconnectedNormalized(string steamId, string reason)
         {
+            if (!_disconnectProcessed.Add(steamId))
+                return;
+
             if (_RustAppEngine?.StateWorker != null)
             {
                 _RustAppEngine.StateWorker.DisconnectReasons[steamId] = reason;
@@ -3544,6 +4201,11 @@ namespace Oxide.Plugins
         {
             UnityEngine.Object.Destroy(_RustAppEngine?.gameObject);
 
+
+            if (CourtApi.players != null)
+                foreach (CourtApi.PluginStatePlayerDto? dto in CourtApi.players.Values)
+                    dto.FreePooledFields();
+
             // Clean-up stale static references
             _RustApp = null;
             _MetaInfo = null;
@@ -3556,14 +4218,13 @@ namespace Oxide.Plugins
 
         private void BanCreate(string steamId, CourtApi.PluginBanCreatePayload payload)
         {
-            CourtApi.BanCreate(payload).Execute(() =>
-            {
-                Log($"Player {steamId} banned for {payload.reason}");
-            },
-            (err) =>
-            {
-                Error($"Failed to ban {steamId}. Reason: {err}");
-            });
+            string reason = payload.reason;
+
+            CourtApi.BanCreate(payload).Execute(
+                () => Log($"Player {steamId} banned for {reason}"),
+                (err) => Error($"Failed to ban {steamId}. Reason: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private void BanDelete(string steamId)
@@ -3575,37 +4236,26 @@ namespace Oxide.Plugins
             (err) => Error($"Failed to unban {steamId}. Reason: {err}"));
         }
 
-        private void CreatePlayerAlertsCustom(Plugin plugin, string message, object data = null, object meta = null)
+        private void CreatePlayerAlertsCustom(Plugin plugin, string message, object? data = null, object? meta = null)
         {
-            CourtApi.PluginPlayerAlertCustomAlertMeta json = new CourtApi.PluginPlayerAlertCustomAlertMeta();
-
-            try
-            {
-                if (meta != null)
-                {
-                    json = JsonConvert.DeserializeObject<CourtApi.PluginPlayerAlertCustomAlertMeta>(JsonConvert.SerializeObject(meta ?? new CourtApi.PluginPlayerAlertCustomAlertMeta()));
-                }
-            }
-            catch
+            CourtApi.PluginPlayerAlertCustomAlertMeta? json = meta as CourtApi.PluginPlayerAlertCustomAlertMeta;
+            if (meta != null && json == null)
             {
                 Error("Wrong CustomAlertMeta params, default will be used!");
             }
 
-            CourtApi.CreatePlayerAlertsCustom(new CourtApi.PluginPlayerAlertCustomDto
-            {
-                msg = message,
-                data = data,
+            CourtApi.PluginPlayerAlertCustomDto? payload = CourtApi.PluginPlayerAlertCustomDto.Create(
+                message,
+                data,
+                customIcon: json?.custom_icon,
+                category: $"{plugin.Name} • {(json?.name ?? "")}",
+                customLinks: json?.custom_links);
 
-                custom_icon = json.custom_icon,
-                hide_in_table = false,
-                category = $"{plugin.Name} • {json.name}",
-                custom_links = json.custom_links
-            }).Execute(
-              (error) =>
-              {
-                  Debug($"Failed to send custom alert: {error}");
-              }
+            CourtApi.CreatePlayerAlertsCustom(payload).Execute(
+                (error) => Debug($"Failed to send custom alert: {error}")
             );
+
+            Pool.Free(ref payload);
         }
 
         #endregion
@@ -3726,11 +4376,11 @@ namespace Oxide.Plugins
 
         public class StableRequest<T> where T : class
         {
-            private string url;
+            private Uri url;
             private string method;
-            private object data;
+            private object? data;
 
-            public StableRequest(string url, RequestMethod requestMethod, object? data)
+            public StableRequest(Uri url, RequestMethod requestMethod, object? data)
             {
                 method = requestMethod switch
                 {
@@ -3744,6 +4394,9 @@ namespace Oxide.Plugins
                 this.url = url;
                 this.data = data;
             }
+
+            public StableRequest(string url, RequestMethod requestMethod, object? data)
+                : this(new Uri(url), requestMethod, data) { }
 
             public void Execute()
             {
@@ -3836,6 +4489,7 @@ namespace Oxide.Plugins
                 using var stringWriter = new PooledTextWriterUtf8();
                 _jsonSerializer.Serialize(stringWriter, data);
                 var dataArray = stringWriter.AsArraySegment();
+
                 var dataNativeArray = new NativeArray<byte>(dataArray.Count, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 NativeArray<byte>.Copy(dataArray.Array, dataNativeArray, dataArray.Count);
 
@@ -3886,60 +4540,39 @@ namespace Oxide.Plugins
 
         private void RustApp_PlayerMuteCreate(string targetSteamId, string reason, string duration, string comment = null, string referenceMessageText = null, bool broadcast = false)
         {
-            var request = CourtApi.PlayerMuteCreate(new CourtApi.PlayerMuteCreateDto
-            {
-                target_steam_id = targetSteamId,
-                reason = reason,
-                broadcast = broadcast,
-                comment = comment,
-                duration = duration,
-                references_message = referenceMessageText
-            });
+            CourtApi.PlayerMuteCreateDto? payload = CourtApi.PlayerMuteCreateDto.Create(targetSteamId, reason, duration, broadcast, comment, referenceMessageText);
 
-            request.Execute(() =>
-            {
-                Puts($"Player ({targetSteamId}) is muted");
-            },
-            (err) =>
-            {
-                PrintError($"Failed to mute player: {err}");
-            });
+            CourtApi.PlayerMuteCreate(payload).Execute(
+                () => Puts($"Player ({targetSteamId}) is muted"),
+                (err) => PrintError($"Failed to mute player: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private void RustApp_PlayerMuteDelete(string targetSteamId)
         {
-            var request = CourtApi.PlayerMuteDelete(new CourtApi.PlayerMuteDeleteDto
-            {
-                target_steam_id = targetSteamId
-            });
+            CourtApi.PlayerMuteDeleteDto? payload = CourtApi.PlayerMuteDeleteDto.Create(targetSteamId);
 
-            request.Execute(() =>
-            {
-                Puts($"Player ({targetSteamId}) is unmuted");
-            },
-            (err) =>
-            {
-                PrintError($"Failed to unmute player: {err}");
-            });
+            CourtApi.PlayerMuteDelete(payload).Execute(
+                () => Puts($"Player ({targetSteamId}) is unmuted"),
+                (err) => PrintError($"Failed to unmute player: {err}"));
+
+            Pool.Free(ref payload);
         }
 
         private long? RA_IsPlayerMuted(BasePlayer player)
         {
-            var mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(player.userID);
+            CourtApi.PlayerMuteDto? mute = _RustAppEngine?.PlayerMuteWorker?.GetMute(player.userID);
 
             return mute?.LeftSeconds();
         }
 
         private void RA_DirectMessageHandler(string from, string to, string message)
         {
-            _RustAppEngine?.ChatWorker?.SaveChatMessage(new CourtApi.PluginChatMessageDto
-            {
-                steam_id = from,
-                target_steam_id = to,
-                is_team = false,
+            ChatWorker? worker = _RustAppEngine?.ChatWorker;
+            if (worker == null) return;
 
-                text = message
-            });
+            worker.SaveChatMessage(CourtApi.PluginChatMessageDto.Create(from, message, isTeam: false, targetSteamId: to));
         }
 
         private void RA_ReportSend(string initiator_steam_id, string target_steam_id, string reason, string message = "")
@@ -3949,30 +4582,20 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var was_checked = _CheckInfo.LastChecks.ContainsKey(target_steam_id) && CurrentTime() - _CheckInfo.LastChecks[target_steam_id] < _Settings.report_ui_show_check_in * 24 * 60 * 60;
+            bool was_checked = _CheckInfo.LastChecks.TryGetValue(target_steam_id, out var lastCheck)
+                               && CurrentTime() - lastCheck < _Settings.report_ui_show_check_in * 24 * 60 * 60;
             Interface.Oxide.CallHook("RustApp_OnPlayerReported", initiator_steam_id, target_steam_id, reason, message, was_checked);
 
-            _RustAppEngine?.ReportWorker?.SendReport(new CourtApi.PluginReportDto
-            {
-                initiator_steam_id = initiator_steam_id,
-                target_steam_id = target_steam_id,
-                sub_targets_steam_ids = new List<string>(),
-                message = message,
-                reason = reason
-            });
+            ReportWorker? worker = _RustAppEngine?.ReportWorker;
+            if (worker == null) return;
+
+            worker.SendReport(CourtApi.PluginReportDto.Create(initiator_steam_id, target_steam_id, reason, message));
         }
 
         private void RA_BanPlayer(string steam_id, string reason, string duration, bool global, bool ban_ip, string comment = "")
         {
-            BanCreate(steam_id, new CourtApi.PluginBanCreatePayload
-            {
-                reason = reason,
-                ban_ip = ban_ip,
-                comment = comment,
-                global = global,
-                target_steam_id = steam_id,
-                duration = duration.Length > 0 ? duration : null
-            });
+            BanCreate(steam_id, CourtApi.PluginBanCreatePayload.Create(
+                steam_id, reason, duration.Length > 0 ? duration : null, global, ban_ip, comment));
         }
 
         private void RA_CreateAlert(Plugin plugin, string message, object data = null, object meta = null)
@@ -3989,6 +4612,7 @@ namespace Oxide.Plugins
             _Settings.report_ui_commands.ForEach(v => cmd.AddChatCommand(v, this, nameof(CmdChatReportInterface)));
 
             cmd.AddChatCommand(_Settings.check_contact_command, this, nameof(CmdSendContact));
+            cmd.AddConsoleCommand(_UiCommandName, this, nameof(OnUiCommand));
         }
 
         private bool CheckRequiredPlugins()
@@ -4003,12 +4627,12 @@ namespace Oxide.Plugins
 
             return true;
         }
-
+        
         private static void Trace(string text)
         {
 #if TRACE
 
-            _RustApp.Puts($"TRACE | {text}");
+            _RustApp?.Puts($"TRACE | {text}");
 
 #endif
         }
@@ -4017,19 +4641,19 @@ namespace Oxide.Plugins
         {
 #if DEBUG
 
-            _RustApp.Puts($"DEBUG | {text}");
+            _RustApp?.Puts($"DEBUG | {text}");
 
 #endif
         }
 
         private static void Log(string text)
         {
-            _RustApp.Puts(text);
+            _RustApp?.Puts(text);
         }
 
         private static void Error(string text)
         {
-            _RustApp.Puts(text);
+            _RustApp?.Puts(text);
         }
 
         private class RustAppWorker : MonoBehaviour
@@ -4051,77 +4675,94 @@ namespace Oxide.Plugins
             Error = 1
         }
 
+        private const string FxToastSelect = "assets/bundled/prefabs/fx/notice/item.select.fx.prefab";
+        private const string FxButtonUnpress = "assets/prefabs/tools/detonator/effects/unpress.prefab";
+        private const string FxInviteNotice = "assets/bundled/prefabs/fx/invite_notice.prefab";
+
+        private static void PlayEffect(BasePlayer player, string prefabPath)
+        {
+            Effect? effect = Effect.reusableInstance;
+            effect.Init(Effect.Type.Generic, player, 0, Vector3.zero, Vector3.zero);
+            effect.pooledString = prefabPath;
+            EffectNetwork.Send(effect, player.Connection);
+        }
+
         private void SoundToast(BasePlayer player, string text, SoundToastType type)
         {
-            Effect effect = new Effect("assets/bundled/prefabs/fx/notice/item.select.fx.prefab", player, 0, new Vector3(), new Vector3());
-            EffectNetwork.Send(effect, player.Connection);
+            PlayEffect(player, FxToastSelect);
 
             player.Command("gametip.showtoast", (int)type, text, 1);
         }
+        
+        [ThreadStatic] private static List<BuildingBlock> _buildAuthBlocks;
+        [ThreadStatic] private static HashSet<uint> _buildAuthSeenBuildings;
 
-        // It is more optimized way to detect building authed instead of default BasePlayer.IsBuildingAuthed()
         private static bool DetectBuildingAuth(BasePlayer player)
         {
-            const int SearchRadius = 16 + 2;
+            const float SearchRadius = 18f;
+            const float SqrRadius = SearchRadius * SearchRadius;
 
-            var pos = player.transform.position;
-            var results = Facepunch.Pool.Get<List<BuildingPrivlidge>>();
-            BaseEntity.Query.Server.GetInSphere(pos, SearchRadius, results, BaseEntity.Query.DistanceCheckType.None);
+            List<BuildingBlock> blocks = _buildAuthBlocks ??= new List<BuildingBlock>(48);
+            HashSet<uint> seenBuildings = _buildAuthSeenBuildings ??= new HashSet<uint>();
+            blocks.Clear();
+            seenBuildings.Clear();
 
-            var isAuthed = false;
-            foreach (var privledge in results)
+            Vector3 pos = player.transform.position;
+            BaseEntity.Query.Server.GetInSphere(pos, SearchRadius, blocks, BaseEntity.Query.DistanceCheckType.None);
+
+            ulong userId = player.userID;
+            int blockCount = blocks.Count;
+
+            for (int i = 0; i < blockCount; i++)
             {
-                if ((privledge.transform.position - pos).sqrMagnitude <= SearchRadius * SearchRadius)
-                {
-                    isAuthed = privledge.IsAuthed(player);
-                    break;
-                }
+                BuildingBlock? block = blocks[i];
+                if ((block.transform.position - pos).sqrMagnitude > SqrRadius) continue;
+
+                if (!seenBuildings.Add(block.buildingID)) continue;
+
+                BuildingManager.Building? building = block.GetBuilding();
+                if (building == null) continue;
+
+                BuildingPrivlidge? tc = building.GetDominatingBuildingPrivilege();
+                if (!tc || !tc.authorizedPlayers.Contains(userId)) continue;
+
+                blocks.Clear();
+                seenBuildings.Clear();
+                return true;
             }
 
-            Facepunch.Pool.FreeUnmanaged(ref results);
-            return isAuthed;
+            blocks.Clear();
+            seenBuildings.Clear();
+            return false;
         }
-
-        private static string HexToRustFormat(string hex)
+        
+        private static readonly HashSet<char> _normalizeAllowed = new()
         {
-            if (string.IsNullOrEmpty(hex))
-            {
-                hex = "#FFFFFFFF";
-            }
-
-            var str = hex.Trim('#');
-
-            if (str.Length == 6)
-                str += "FF";
-
-            if (str.Length != 8)
-            {
-                throw new Exception(hex);
-            }
-
-            var r = byte.Parse(str.Substring(0, 2), NumberStyles.HexNumber);
-            var g = byte.Parse(str.Substring(2, 2), NumberStyles.HexNumber);
-            var b = byte.Parse(str.Substring(4, 2), NumberStyles.HexNumber);
-            var a = byte.Parse(str.Substring(6, 2), NumberStyles.HexNumber);
-
-            UnityEngine.Color color = new Color32(r, g, b, a);
-
-            return string.Format("{0:F2} {1:F2} {2:F2} {3:F2}", color.r, color.g, color.b, color.a);
-        }
-
-        private static List<char> Letters = new List<char> { '☼', 's', 't', 'r', 'e', 'т', 'ы', 'в', 'о', 'ч', 'х', 'а', 'р', 'u', 'c', 'h', 'a', 'n', 'z', 'o', '^', 'm', 'l', 'b', 'i', 'p', 'w', 'f', 'k', 'y', 'v', '$', '+', 'x', '1', '®', 'd', '#', 'г', 'ш', 'к', '.', 'я', 'у', 'с', 'ь', 'ц', 'и', 'б', 'е', 'л', 'й', '_', 'м', 'п', 'н', 'g', 'q', '3', '4', '2', ']', 'j', '[', '8', '{', '}', '_', '!', '@', '#', '$', '%', '&', '?', '-', '+', '=', '~', ' ', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п', 'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ь', 'ы', 'ъ', 'э', 'ю', 'я' };
+            '☼', '^', '$', '+', '®', '#', '.', '_', ']', '[', '{', '}', '!', '@', '%', '&', '?', '-', '=', '~', ' ',
+            '1', '2', '3', '4', '8',
+            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+            'а', 'б', 'в', 'г', 'д', 'е', 'ё', 'ж', 'з', 'и', 'й', 'к', 'л', 'м', 'н', 'о', 'п', 'р', 'с', 'т', 'у', 'ф', 'х', 'ц', 'ч', 'ш', 'щ', 'ь', 'ы', 'ъ', 'э', 'ю', 'я'
+        };
 
         private static string NormalizeString(string text)
         {
-            string name = "";
+            if (string.IsNullOrEmpty(text)) return string.Empty;
 
-            foreach (var @char in text)
+            StringBuilder? sb = Pool.Get<StringBuilder>();
+            try
             {
-                if (Letters.Contains(@char.ToString().ToLower().ToCharArray()[0]))
-                    name += @char;
+                for (int i = 0; i < text.Length; i++)
+                {
+                    char c = text[i];
+                    if (_normalizeAllowed.Contains(char.ToLowerInvariant(c)))
+                        sb.Append(c);
+                }
+                return sb.Length == 0 ? string.Empty : sb.ToString();
             }
-
-            return name;
+            finally
+            {
+                Pool.FreeUnmanaged(ref sb);
+            }
         }
 
         private static bool DetectIsRaidBlock(BasePlayer player)
@@ -4203,7 +4844,7 @@ namespace Oxide.Plugins
 
         private static void ResurrectDictionary<T, V>(Dictionary<T, V> oldDict, Dictionary<T, V> newDict)
         {
-            foreach (var old in oldDict)
+            foreach (KeyValuePair<T, V> old in oldDict)
             {
                 newDict[old.Key] = old.Value;
             }
@@ -4219,7 +4860,13 @@ namespace Oxide.Plugins
 
         private bool CloseConnection(string steamId, string reason)
         {
-            var player = BasePlayer.Find(steamId);
+            if (!ulong.TryParse(steamId, out ulong targetUserId))
+            {
+                Error($"Failed to close connection with {steamId}: {reason} (not a valid ulong)");
+                return false;
+            }
+            
+            BasePlayer? player = BasePlayer.FindByID(targetUserId);
             if (player != null && player.IsConnected)
             {
                 Log($"Closing connection with {steamId}: {reason} (by player)");
@@ -4228,36 +4875,64 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            var connection = ConnectionAuth.m_AuthConnection.Find(v => v.userid.ToString() == steamId);
-            if (connection != null)
+            List<Connection>? authList = ConnectionAuth.m_AuthConnection;
+            for (int i = 0; i < authList.Count; i++)
             {
+                Connection? c = authList[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by m_AuthConnection)");
-                Network.Net.sv.Kick(connection, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            var loading = ServerMgr.Instance.connectionQueue.joining.Find(v => v.userid.ToString() == steamId);
-            if (loading != null)
+            List<Connection>? joining = ServerMgr.Instance.connectionQueue.joining;
+            for (int i = 0; i < joining.Count; i++)
             {
+                Connection? c = joining[i];
+                if (c.userid != targetUserId)
+                    continue;
+                
                 Log($"Closing connection with {steamId}: {reason} (by joining)");
-                Network.Net.sv.Kick(loading, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            var queued = ServerMgr.Instance.connectionQueue.queue.Find(v => v.userid.ToString() == steamId);
-            if (queued != null)
+            List<Connection>? queue = ServerMgr.Instance.connectionQueue.queue;
+            for (int i = 0; i < queue.Count; i++)
             {
+                Connection? c = queue[i];
+                if (c.userid != targetUserId)
+                    continue;
+
                 Log($"Closing connection with {steamId}: {reason} (by queued)");
-                Network.Net.sv.Kick(queued, reason);
+                Network.Net.sv.Kick(c, reason);
                 OnPlayerDisconnectedNormalized(steamId, reason);
                 return true;
             }
 
-            Error($"Failed to close connection with {steamId}: {reason}");
+            // Steam auth pending — Connection is also in m_AuthConnection normally, but check as a safety net
+            List<Connection>? steamWaiting = Auth_Steam.waitingList;
+            for (int i = 0; i < steamWaiting.Count; i++)
+            {
+                Connection? c = steamWaiting[i];
+                if (c.userid != targetUserId)
+                    continue;
 
-            return false;
+                Log($"Closing connection with {steamId}: {reason} (by Auth_Steam.waitingList)");
+                Network.Net.sv.Kick(c, reason);
+                OnPlayerDisconnectedNormalized(steamId, reason);
+                return true;
+            }
+
+            // Connection is in a transition gap (between JoinedGame removing it from joining and BasePlayer.Spawn registering it).
+            // Defer the kick — OnPlayerConnected will finish it once BasePlayer exists.
+            _pendingKick[targetUserId] = reason;
+            Log($"Closing connection with {steamId}: {reason} (deferred → not in any list, will kick on OnPlayerConnected)");
+            return true;
         }
 
         private void SendMessage(BasePlayer player, string message, string initiator_steam_id = "")
@@ -4280,110 +4955,27 @@ namespace Oxide.Plugins
 
             return ipWithPort;
         }
+        
+        private const ulong SteamId64Base = 76561197960265728UL;
 
-        private double CurrentTime() => DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
+        public static bool IsRealSteamId(ulong userId) => userId >= SteamId64Base;
 
-        #region UI Commands references
+        public static bool IsRealSteamId(string steamId)
+            => !string.IsNullOrEmpty(steamId) && ulong.TryParse(steamId, out ulong id) && id >= SteamId64Base;
 
-        #region Variables
+        public static bool IsRealSteamId(BasePlayer player)
+            => player.userID >= SteamId64Base;
+        
+        private static readonly Dictionary<ulong, string> _steamIdStringCache = new();
 
-        private Dictionary<string, string> UICommands = new Dictionary<string, string>();
-
-        #endregion
-
-        #region Methods
-
-        private string UICommand<T>(Action<BasePlayer, T, string> callback, T arg, string commandName)
+        public static string GetSteamIdString(ulong userId)
         {
-            var argument = $" {JsonConvert.SerializeObject(arg)}~INPUT_LIMITTER~";
-
-            if (UICommands.ContainsKey(commandName))
-            {
-                return UICommands[commandName] + argument;
-            }
-
-            var commandUuid = CuiHelper.GetGuid();
-
-            UICommands.Add(commandName, commandUuid);
-
-            cmd.AddConsoleCommand(commandUuid, this, (args) =>
-            {
-                var player = args.Player();
-
-                try
-                {
-                    var str = "";
-                    var input = "";
-
-                    args?.Args?.ToList()?.ForEach(v =>
-                    {
-                        str += $"{v} ";
-                    });
-
-                    if (str.Contains("~INPUT_LIMITTER~"))
-                    {
-                        try
-                        {
-                            string[] parts = str.Split(new string[] { "~INPUT_LIMITTER~" }, StringSplitOptions.None);
-
-                            input = parts[1].Trim();
-                            str = parts[0];
-                        }
-                        catch (Exception exc4)
-                        {
-                            Error($"Failed to parse UICommand arguments (input): {args?.FullString} {str} {input}");
-                            Error(exc4.ToString());
-                        }
-                    }
-
-                    try
-                    {
-                        while (str.Contains("\\r "))
-                        {
-                            str = str.Replace("\\r ", "");
-                        }
-                        while (str.Contains("\r "))
-                        {
-                            str = str.Replace("\r ", "");
-                        }
-                        while (str.Contains("\r"))
-                        {
-                            str = str.Replace("\r", "");
-                        }
-
-                        var restoredArgument = JsonConvert.DeserializeObject<T>(str);
-
-                        try
-                        {
-                            callback(player, restoredArgument, input ?? "");
-                        }
-                        catch (Exception exc3)
-                        {
-                            Error($"Failed to parse UICommand arguments (callback): {args?.FullString} {str} {input}");
-                            Error(exc3.ToString());
-                        }
-                    }
-                    catch (Exception exc2)
-                    {
-                        Error($"Failed to parse UICommand arguments (deserialize): {args?.FullString} {str} {input}");
-                        Error(exc2.ToString());
-                    }
-                }
-                catch (Exception exc)
-                {
-                    Error($"Failed to parse UICommand arguments: {args?.FullString}");
-                    Error(exc.ToString());
-                }
-
-                return true;
-            });
-
-            return commandUuid + argument;
+            if (_steamIdStringCache.TryGetValue(userId, out string? cached))
+                return cached;
+            return _steamIdStringCache[userId] = userId.ToString();
         }
 
-        #endregion
-
-        #endregion
+        private double CurrentTime() => DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
 
         #endregion
 
@@ -4477,11 +5069,16 @@ namespace Oxide.Plugins
 
             private byte[] GetImageBytes(Bitmap image)
             {
-                MemoryStream stream = Facepunch.Pool.Get<MemoryStream>();
-                image.Save(stream, ImageFormat.Png);
-                byte[] bytes = stream.ToArray();
-                Facepunch.Pool.FreeUnmanaged(ref stream);
-                return bytes;
+                MemoryStream? stream = Pool.Get<MemoryStream>();
+                try
+                {
+                    image.Save(stream, ImageFormat.Png);
+                    return stream.ToArray();
+                }
+                finally
+                {
+                    Pool.FreeUnmanaged(ref stream);
+                }
             }
         }
 
