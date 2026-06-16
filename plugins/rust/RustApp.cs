@@ -4694,55 +4694,31 @@ public class RustApp : RustPlugin
         player.Command("gametip.showtoast", (int)type, text, 1);
     }
 
-    private static readonly HashSet<uint> _buildAuthSeen = new HashSet<uint>();
-    private static readonly BaseEntity[] _buildAuthSearchArr = new BaseEntity[16384];
-    private static readonly Func<BaseEntity, bool> _buildAuthIsBlock = static e => e is BuildingBlock;
+    private static readonly BaseEntity[] _buildAuthArr = new BaseEntity[32];
+    private static readonly Func<BaseEntity, bool> _buildAuthFilter = static e => e is BuildingPrivlidge;
 
+    // It is more optimized way to detect building authed instead of default BasePlayer.IsBuildingAuthed()
     private static bool DetectBuildingAuth(BasePlayer player)
     {
-        const float SearchRadius = 16f;
+        const float SearchRadius = 22f;
         const float SqrRadius = SearchRadius * SearchRadius;
 
-        HashSet<uint> seen = _buildAuthSeen;
-        BaseEntity[] arr = _buildAuthSearchArr;
-        
-        OBB playerObb = player.WorldSpaceBounds();
-        ulong uid = player.userID;
-
-        int entCount = BaseEntity.Query.Server.GetInSphereFast(playerObb.position, SearchRadius, arr, _buildAuthIsBlock);
+        Vector3 pos = player.transform.position;
+        int count = BaseEntity.Query.Server.GetInSphereFast(pos, SearchRadius, _buildAuthArr, _buildAuthFilter);
 
         try
         {
-            for (int i = 0; i < entCount; i++)
+            for (int i = 0; i < count; i++)
             {
-                BuildingBlock block = (BuildingBlock)arr[i];
-
-                if (seen.Contains(block.buildingID)) continue;
-
-                if (playerObb.SqrDistance(block.WorldSpaceBounds()) > SqrRadius) continue;
-
-                BuildingManager.Building? building = block.GetBuilding();
-                if (building == null) continue;
-
-                seen.Add(block.buildingID);
-
-                ListHashSet<BuildingPrivlidge>? privs = building.buildingPrivileges;
-                if (privs == null) continue;
-
-                int tcCount = privs.Count;
-                for (int j = 0; j < tcCount; j++)
-                {
-                    BuildingPrivlidge? tc = privs[j];
-                    if (tc != null && tc.authorizedPlayers.Contains(uid))
-                        return true;
-                }
+                BuildingPrivlidge tc = (BuildingPrivlidge)_buildAuthArr[i];
+                if ((tc.transform.position - pos).sqrMagnitude <= SqrRadius)
+                    return tc.IsAuthed(player);
             }
             return false;
         }
         finally
         {
-            seen.Clear();
-            Array.Clear(arr, 0, entCount);
+            Array.Clear(_buildAuthArr, 0, count);
         }
     }
 
