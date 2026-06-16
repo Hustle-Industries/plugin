@@ -4694,45 +4694,52 @@ public class RustApp : RustPlugin
         player.Command("gametip.showtoast", (int)type, text, 1);
     }
 
-    [ThreadStatic] private static List<BuildingBlock> _buildAuthBlocks;
-    [ThreadStatic] private static HashSet<uint> _buildAuthSeenBuildings;
+    private static readonly HashSet<uint> _buildAuthSeen = new HashSet<uint>();
+    private static readonly BaseEntity[] _buildAuthSearchArr = new BaseEntity[16384];
+    private static readonly Func<BaseEntity, bool> _buildAuthIsBlock = static e => e is BuildingBlock;
 
     private static bool DetectBuildingAuth(BasePlayer player)
     {
-        const float SearchRadius = 18f;
+        const float SearchRadius = 16f;
         const float SqrRadius = SearchRadius * SearchRadius;
 
-        List<BuildingBlock> blocks = _buildAuthBlocks ??= new List<BuildingBlock>(48);
-        HashSet<uint> seenBuildings = _buildAuthSeenBuildings ??= new HashSet<uint>();
-        blocks.Clear();
-        seenBuildings.Clear();
-
+        HashSet<uint> seen = _buildAuthSeen;
+        BaseEntity[] arr = _buildAuthSearchArr;
         Vector3 pos = player.transform.position;
-        BaseEntity.Query.Server.GetInSphere(pos, SearchRadius, blocks, BaseEntity.Query.DistanceCheckType.None);
+        ulong uid = player.userID;
 
-        ulong userId = player.userID;
-        int blockCount = blocks.Count;
+        int entCount = BaseEntity.Query.Server.GetInSphereFast(pos, SearchRadius, arr, _buildAuthIsBlock);
 
-        for (int i = 0; i < blockCount; i++)
+        for (int i = 0; i < entCount; i++)
         {
-            BuildingBlock? block = blocks[i];
-            if ((block.transform.position - pos).sqrMagnitude > SqrRadius) continue;
+            BuildingBlock block = (BuildingBlock)arr[i];
 
-            if (!seenBuildings.Add(block.buildingID)) continue;
+            if (seen.Contains(block.buildingID)) continue;
+
+            Vector3 d = block.transform.position - pos;
+            if (d.x * d.x + d.y * d.y + d.z * d.z > SqrRadius) continue;
 
             BuildingManager.Building? building = block.GetBuilding();
             if (building == null) continue;
 
-            BuildingPrivlidge? tc = building.GetDominatingBuildingPrivilege();
-            if (!tc || !tc.authorizedPlayers.Contains(userId)) continue;
+            seen.Add(block.buildingID);
 
-            blocks.Clear();
-            seenBuildings.Clear();
-            return true;
+            ListHashSet<BuildingPrivlidge>? privs = building.buildingPrivileges;
+            if (privs == null) continue;
+
+            int tcCount = privs.Count;
+            for (int j = 0; j < tcCount; j++)
+            {
+                BuildingPrivlidge? tc = privs[j];
+                if (tc != null && tc.authorizedPlayers.Contains(uid))
+                {
+                    seen.Clear();
+                    return true;
+                }
+            }
         }
 
-        blocks.Clear();
-        seenBuildings.Clear();
+        seen.Clear();
         return false;
     }
 
