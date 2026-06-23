@@ -31,6 +31,10 @@ using Star = ProtoBuf.PatternFirework.Star;
 
 namespace Oxide.Plugins;
 
+// Original ship built by Hougan.
+// Planks replaced by DezLifer, Bombardir, Phrog, Nimant
+// The Ship of Theseus problem: is this still his code?
+
 [Info("RustApp", "RustApp.io", "3.0.0")]
 public class RustApp : RustPlugin
 {
